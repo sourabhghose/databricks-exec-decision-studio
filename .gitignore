@@ -1,0 +1,29 @@
+# Node
+app/frontend/node_modules/
+app/frontend/dist/
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Environment / secrets
+.env
+.env.*
+*.token
+
+# Databricks CLI state
+.databricks/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

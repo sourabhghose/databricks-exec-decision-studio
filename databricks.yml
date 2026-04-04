@@ -1,0 +1,138 @@
+bundle:
+  name: exec-decision-studio
+
+variables:
+  catalog:
+    default: ausnet_process_intel_catalog
+  schema_prefix:
+    default: eds
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://fevm-ausnet-process-intel.cloud.databricks.com
+
+resources:
+  jobs:
+    eds_setup_job:
+      name: "[EDS] 00 - Setup & Synthetic Data"
+      tasks:
+        - task_key: init_schemas
+          notebook_task:
+            notebook_path: notebooks/00_setup/00_init_schemas.py
+            source: WORKSPACE
+          environment_key: eds_env
+        - task_key: generate_synthetic_data
+          depends_on:
+            - task_key: init_schemas
+          notebook_task:
+            notebook_path: notebooks/00_setup/01_generate_synthetic_data.py
+            source: WORKSPACE
+          environment_key: eds_env
+        - task_key: upload_docs_to_volume
+          depends_on:
+            - task_key: generate_synthetic_data
+          notebook_task:
+            notebook_path: notebooks/00_setup/02_upload_docs_to_volume.py
+            source: WORKSPACE
+          environment_key: eds_env
+        - task_key: generate_rich_documents
+          depends_on:
+            - task_key: upload_docs_to_volume
+          notebook_task:
+            notebook_path: notebooks/00_setup/03_generate_rich_documents.py
+            source: WORKSPACE
+          environment_key: eds_rich_env
+      environments:
+        - environment_key: eds_env
+          spec:
+            client: "1"
+            dependencies:
+              - faker
+        - environment_key: eds_rich_env
+          spec:
+            client: "1"
+            dependencies:
+              - faker
+              - matplotlib
+              - python-pptx
+              - openpyxl
+
+    eds_ingestion_job:
+      name: "[EDS] 01 - Document Ingestion & Embedding"
+      tasks:
+        - task_key: document_ingestion
+          notebook_task:
+            notebook_path: notebooks/01_ingestion/01_document_ingestion.py
+            source: WORKSPACE
+          environment_key: eds_ingest_env
+        - task_key: chunk_and_embed
+          depends_on:
+            - task_key: document_ingestion
+          notebook_task:
+            notebook_path: notebooks/01_ingestion/02_chunk_and_embed.py
+            source: WORKSPACE
+          environment_key: eds_ingest_env
+      environments:
+        - environment_key: eds_ingest_env
+          spec:
+            client: "1"
+            dependencies:
+              - requests
+              - pdfplumber
+              - python-pptx
+              - openpyxl
+
+    eds_rag_job:
+      name: "[EDS] 02 - RAG Chain Setup"
+      tasks:
+        - task_key: vector_search_setup
+          notebook_task:
+            notebook_path: notebooks/02_rag/01_vector_search_setup.py
+            source: WORKSPACE
+          environment_key: eds_env
+        - task_key: rag_chain
+          depends_on:
+            - task_key: vector_search_setup
+          notebook_task:
+            notebook_path: notebooks/02_rag/02_rag_chain.py
+            source: WORKSPACE
+          environment_key: eds_env
+      environments:
+        - environment_key: eds_env
+          spec:
+            client: "1"
+            dependencies:
+              - langchain
+              - langchain-community
+              - databricks-langchain
+              - databricks-vectorsearch
+              - mlflow
+
+    eds_agents_job:
+      name: "[EDS] 03 - Deploy Agents"
+      tasks:
+        - task_key: supervisor_agent
+          notebook_task:
+            notebook_path: notebooks/03_agents/00_supervisor_agent.py
+            source: WORKSPACE
+          environment_key: eds_env
+        - task_key: evaluation_agent
+          depends_on:
+            - task_key: supervisor_agent
+          notebook_task:
+            notebook_path: notebooks/03_agents/06_evaluation_agent.py
+            source: WORKSPACE
+          environment_key: eds_env
+      environments:
+        - environment_key: eds_env
+          spec:
+            client: "1"
+            dependencies:
+              - langchain
+              - langchain-community
+              - databricks-langchain
+              - databricks-vectorsearch
+              - mlflow

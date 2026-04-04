@@ -1,0 +1,19 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+resources:
+  - name: warehouse
+    sql_warehouse:
+      id: 33baaa9523773520
+      permission: CAN_USE
+
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: warehouse
