@@ -301,3 +301,92 @@ async def get_financials():
             bu_map[bu]["budget"] = val
 
     return {"data": list(bu_map.values()), "demo": False}
+
+
+# ── AI Insights ───────────────────────────────────────────────────────────────
+
+DEMO_KPI_INSIGHT = (
+    "Generation assets are outperforming targets with LYB Availability at 93.5% and Yandin Capacity "
+    "Factor at 40.1%, driven by favourable wind conditions and successful planned maintenance. "
+    "Retail metrics are the primary concern: NPS at 22 (target 25, -12%) and Churn at 19.8% (target 18%) "
+    "are trending adversely, and Customer Acquisition Cost has triggered an anomaly at $185 vs $170 target. "
+    "**Priority actions:** (1) ELT to review Retail NPS recovery plan with fortnightly tracking dashboard; "
+    "(2) CMO to present CAC reduction strategy to CFO by end of week."
+)
+
+
+def _run_sql_slow(sql: str) -> list:
+    tok = get_token()
+    wh = get_warehouse_id()
+    url = get_workspace_url()
+    if not tok or not wh:
+        return []
+    try:
+        r = requests.post(
+            f"{url}/api/2.0/sql/statements",
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+            json={"warehouse_id": wh, "statement": sql, "wait_timeout": "60s"},
+            timeout=75,
+        )
+        if not r.ok:
+            return []
+        d = r.json()
+        if d.get("status", {}).get("state") != "SUCCEEDED":
+            return []
+        result = d.get("result", {})
+        if not result.get("data_array"):
+            return []
+        cols = [c["name"] for c in d.get("manifest", {}).get("schema", {}).get("columns", [])]
+        return [dict(zip(cols, row)) for row in result["data_array"]]
+    except Exception as e:
+        print(f"[SQL/KPI slow] {e}")
+        return []
+
+
+@router.get("/api/kpi/ai_insights")
+async def kpi_ai_insights():
+    """AI narrative for current KPI performance via ai_query."""
+    rows = _run_sql(f"""
+        SELECT kpi_name, business_unit,
+               ROUND(CAST(value AS DOUBLE), 2) as v, unit,
+               ROUND(CAST(target AS DOUBLE), 2) as t,
+               ROUND((CAST(value AS DOUBLE) - CAST(target AS DOUBLE))
+                 / NULLIF(ABS(CAST(target AS DOUBLE)), 0) * 100, 1) as pct,
+               is_anomaly
+        FROM {CATALOG}.eds_synthetic.kpi_timeseries
+        WHERE period = (SELECT MAX(period) FROM {CATALOG}.eds_synthetic.kpi_timeseries)
+        ORDER BY business_unit, kpi_name
+    """)
+
+    use_demo = not rows
+    kpis = DEMO_KPIS if use_demo else [
+        {
+            "kpi_name": r["kpi_name"], "business_unit": r.get("business_unit", ""),
+            "value": float(r.get("v", 0)), "unit": r.get("unit", ""),
+            "target": float(r.get("t", 0)),
+            "pct_vs_target": float(r.get("pct") or 0),
+            "is_anomaly": str(r.get("is_anomaly", "")).lower() in ("true", "1"),
+        }
+        for r in rows
+    ]
+
+    below = [k for k in kpis if k["pct_vs_target"] < 0]
+    anomalies = [k["kpi_name"] for k in kpis if k.get("is_anomaly")]
+    above = [k for k in kpis if k["pct_vs_target"] >= 0]
+
+    below_summary = [(k["kpi_name"], f"{k['pct_vs_target']:+.1f}%") for k in below[:5]]
+    prompt = (
+        f"You are Alinta Energy's KPI Intelligence Agent. Analysing {len(kpis)} KPIs: "
+        f"{len(above)} meeting or exceeding target, {len(below)} below target. "
+        f"Below-target KPIs: {below_summary}. "
+        f"Anomalies detected: {anomalies or ['none']}. "
+        "Provide a 3-sentence executive narrative covering the dominant performance theme, "
+        "the most critical concern, and the single most important leadership action. "
+        "Be commercially direct and avoid generic statements."
+    ).replace("'", "''")
+
+    result = _run_sql_slow(f"SELECT ai_query('databricks-claude-sonnet-4-6', '{prompt}') as insight")
+    if result and result[0].get("insight"):
+        return {"insight": str(result[0]["insight"]), "demo": False}
+
+    return {"insight": DEMO_KPI_INSIGHT, "demo": True}

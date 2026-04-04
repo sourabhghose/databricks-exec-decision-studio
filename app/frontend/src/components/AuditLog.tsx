@@ -5,7 +5,18 @@ import {
   ShieldAlert,
   Clock,
   Cpu,
+  BarChart3,
 } from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
 
 interface AuditEntry {
   timestamp: string;
@@ -16,6 +27,21 @@ interface AuditEntry {
   latency_ms: number;
   compliant: boolean;
 }
+
+interface ChartPoint {
+  agent_name: string;
+  avg_confidence: number;
+  query_count: number;
+}
+
+const AGENT_COLORS: Record<string, string> = {
+  doc_qa: "#60a5fa",
+  kpi_monitor: "#34d399",
+  briefing: "#c4962a",
+  competitive: "#a78bfa",
+  strategic_gap: "#f472b6",
+  supervisor: "#f59e0b",
+};
 
 function agentBadgeColor(agent: string): string {
   const map: Record<string, string> = {
@@ -38,11 +64,19 @@ export default function AuditLog() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [demo, setDemo] = useState(false);
+  const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [agentFilter, setAgentFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const fetchAudit = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/audit");
+      const params = new URLSearchParams();
+      if (agentFilter) params.set("agent", agentFilter);
+      if (dateFrom) params.set("date_from", dateFrom);
+      if (dateTo) params.set("date_to", dateTo);
+      const res = await fetch(`/api/audit?${params}`);
       const data = await res.json();
       setEntries(data.data || []);
       setDemo(data.demo || false);
@@ -56,6 +90,13 @@ export default function AuditLog() {
 
   useEffect(() => {
     fetchAudit();
+  }, [agentFilter, dateFrom, dateTo]);
+
+  useEffect(() => {
+    fetch("/api/audit/chart")
+      .then((r) => r.json())
+      .then((d) => setChartData(d.data || []))
+      .catch(() => {});
   }, []);
 
   return (
@@ -84,6 +125,60 @@ export default function AuditLog() {
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           Refresh
         </button>
+      </div>
+
+      {/* ── Confidence Chart ────────────────────────────────────── */}
+      {chartData.length > 0 && (
+        <div className="glass-card p-5">
+          <h3 className="text-[12px] font-semibold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <BarChart3 size={13} className="text-gold" />
+            Avg Confidence by Agent (last 30 days)
+          </h3>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={chartData} barSize={36}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <XAxis dataKey="agent_name" tick={{ fill: "#64748b", fontSize: 11 }} tickFormatter={(v) => agentLabel(v)} />
+              <YAxis domain={[0, 1]} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tick={{ fill: "#64748b", fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#e2e8f0", fontSize: 12 }}
+                formatter={(v, _n, item) => [`${(Number(v) * 100).toFixed(0)}% avg (${item?.payload?.query_count ?? 0} queries)`, "Confidence"]}
+                labelFormatter={(v) => agentLabel(v)}
+              />
+              <Bar dataKey="avg_confidence" radius={[4, 4, 0, 0]}>
+                {chartData.map((entry, i) => (
+                  <Cell key={i} fill={AGENT_COLORS[entry.agent_name] || "#64748b"} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* ── Filters ─────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <select
+          value={agentFilter}
+          onChange={(e) => setAgentFilter(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs bg-dark-card border border-dark-border text-slate-300 cursor-pointer"
+        >
+          <option value="">All Agents</option>
+          {["doc_qa", "kpi_monitor", "briefing", "competitive", "strategic_gap", "supervisor"].map((a) => (
+            <option key={a} value={a}>{agentLabel(a)}</option>
+          ))}
+        </select>
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs bg-dark-card border border-dark-border text-slate-300"
+          placeholder="From date" />
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs bg-dark-card border border-dark-border text-slate-300"
+          placeholder="To date" />
+        {(agentFilter || dateFrom || dateTo) && (
+          <button onClick={() => { setAgentFilter(""); setDateFrom(""); setDateTo(""); }}
+            className="px-3 py-1.5 rounded-lg text-xs border border-dark-border text-slate-400 hover:text-slate-200 cursor-pointer">
+            Clear
+          </button>
+        )}
+        <span className="text-[11px] text-slate-500">{entries.length} entries</span>
       </div>
 
       {/* ── Table ───────────────────────────────────────────────── */}

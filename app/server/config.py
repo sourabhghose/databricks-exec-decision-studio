@@ -9,6 +9,7 @@ IS_DATABRICKS_APP = bool(os.environ.get("DATABRICKS_APP_NAME"))
 
 CATALOG = "ausnet_process_intel_catalog"
 LLM_ENDPOINT = "databricks-claude-sonnet-4-6"
+SUPERVISOR_ENDPOINT = os.environ.get("SUPERVISOR_ENDPOINT", "")  # MLflow-served RAG chain (optional)
 VS_INDEX = f"{CATALOG}.eds_vectors.document_chunks_index"
 
 TIER_MAP = {

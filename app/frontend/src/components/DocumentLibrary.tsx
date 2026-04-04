@@ -167,11 +167,34 @@ export default function DocumentLibrary() {
   const [showFilters, setShowFilters] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadMsg, setUploadMsg] = useState("");
+  const [uploadRunId, setUploadRunId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Poll ingestion job status
+  useEffect(() => {
+    if (!uploadRunId) return;
+    const interval = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/documents/upload/status?run_id=${uploadRunId}`);
+        const d = await r.json();
+        setUploadMsg(d.message || "Processing…");
+        if (d.state === "success") {
+          setUploadStatus("success");
+          setUploadRunId(null);
+          setTimeout(() => setUploadStatus("idle"), 10000);
+        } else if (d.state === "error") {
+          setUploadStatus("error");
+          setUploadRunId(null);
+        }
+      } catch { /* ignore polling errors */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [uploadRunId]);
 
   async function handleUpload(file: File) {
     setUploadStatus("uploading");
     setUploadMsg(`Uploading "${file.name}"…`);
+    setUploadRunId(null);
     try {
       const form = new FormData();
       form.append("file", file);
@@ -182,6 +205,10 @@ export default function DocumentLibrary() {
       if (!r.ok || data.error) {
         setUploadStatus("error");
         setUploadMsg(data.error || "Upload failed.");
+      } else if (data.run_id) {
+        // Start polling job status
+        setUploadRunId(data.run_id);
+        setUploadMsg("File uploaded — ingestion job running…");
       } else {
         setUploadStatus("success");
         setUploadMsg(data.message || `"${file.name}" uploaded. Available for querying in ~2 min.`);

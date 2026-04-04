@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { RefreshCw, ShieldAlert, AlertTriangle, Info } from "lucide-react";
+import { RefreshCw, ShieldAlert, AlertTriangle, Info, Sparkles } from "lucide-react";
 
 interface Risk {
   risk_id: string;
@@ -110,6 +110,8 @@ export default function RiskRegister() {
   const [demo, setDemo] = useState(false);
   const [filter, setFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<Record<string, string>>({});
+  const [aiLoading, setAiLoading] = useState<Record<string, boolean>>({});
 
   const fetchRisks = async () => {
     setLoading(true);
@@ -127,6 +129,20 @@ export default function RiskRegister() {
   };
 
   useEffect(() => { fetchRisks(); }, []);
+
+  async function fetchRiskAnalysis(riskId: string) {
+    if (aiAnalysis[riskId] || aiLoading[riskId]) return;
+    setAiLoading((prev) => ({ ...prev, [riskId]: true }));
+    try {
+      const r = await fetch(`/api/risks/ai_insights?risk_id=${riskId}`);
+      const d = await r.json();
+      setAiAnalysis((prev) => ({ ...prev, [riskId]: d.insight || "No analysis available." }));
+    } catch {
+      setAiAnalysis((prev) => ({ ...prev, [riskId]: "Analysis failed — check connection." }));
+    } finally {
+      setAiLoading((prev) => ({ ...prev, [riskId]: false }));
+    }
+  }
 
   const categories = ["all", ...Array.from(new Set(risks.map((r) => r.category)))];
   const filtered = filter === "all" ? risks : risks.filter((r) => r.category === filter);
@@ -232,8 +248,28 @@ export default function RiskRegister() {
                           <span>Consequence: <span className="text-slate-400">{risk.consequence}</span></span>
                         </div>
                         {expanded === risk.risk_id && (
-                          <div className="mt-3 p-3 rounded-lg bg-dark-bg border border-dark-border text-xs text-slate-400 leading-relaxed">
-                            <span className="text-gold font-medium">Mitigation: </span>{risk.mitigation}
+                          <div className="mt-3 space-y-2">
+                            <div className="p-3 rounded-lg bg-dark-bg border border-dark-border text-xs text-slate-400 leading-relaxed">
+                              <span className="text-gold font-medium">Mitigation: </span>{risk.mitigation}
+                            </div>
+                            {aiAnalysis[risk.risk_id] ? (
+                              <div className="p-3 rounded-lg bg-amber-400/5 border border-amber-400/20 text-xs text-slate-300 leading-relaxed">
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <Sparkles size={11} className="text-amber-400" />
+                                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">AI Risk Analysis</span>
+                                </div>
+                                <p dangerouslySetInnerHTML={{ __html: aiAnalysis[risk.risk_id].replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>') }} />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); fetchRiskAnalysis(risk.risk_id); }}
+                                disabled={aiLoading[risk.risk_id]}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] border border-amber-400/20 text-amber-400 hover:bg-amber-400/10 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {aiLoading[risk.risk_id] ? <RefreshCw size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                                {aiLoading[risk.risk_id] ? "Analysing…" : "Get AI Analysis"}
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>

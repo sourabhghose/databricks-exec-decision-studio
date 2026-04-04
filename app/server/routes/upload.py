@@ -111,3 +111,45 @@ async def upload_document(
             else f"'{safe_name}' uploaded to Tier {tier} volume. Manually run the ingestion job to index it."
         ),
     }
+
+
+@router.get("/api/documents/upload/status")
+async def upload_status(run_id: str):
+    """Poll the Databricks ingestion job run status."""
+    tok = get_token()
+    workspace_url = get_workspace_url()
+    if not tok:
+        return {"state": "unknown", "message": "Auth unavailable — check status manually."}
+    try:
+        r = requests.get(
+            f"{workspace_url}/api/2.1/jobs/runs/get",
+            headers={"Authorization": f"Bearer {tok}"},
+            params={"run_id": run_id},
+            timeout=10,
+        )
+        if not r.ok:
+            return {"state": "unknown", "message": f"Status unavailable ({r.status_code})"}
+        data = r.json()
+        state = data.get("state", {})
+        life = state.get("life_cycle_state", "PENDING")
+        result_state = state.get("result_state", "")
+        msg = state.get("state_message", "")
+
+        tasks = data.get("tasks", [])
+        running_task = next((t for t in tasks if t.get("state", {}).get("life_cycle_state") == "RUNNING"), None)
+
+        if life in ("PENDING", "WAITING_FOR_RETRY"):
+            return {"state": "queued", "message": "Job queued — waiting for compute…"}
+        if life == "RUNNING":
+            label = running_task.get("task_key", "processing").replace("_", " ") if running_task else "processing"
+            return {"state": "running", "message": f"Running: {label}…"}
+        if life == "TERMINATING":
+            return {"state": "running", "message": "Finalising index…"}
+        if life == "TERMINATED":
+            if result_state == "SUCCESS":
+                return {"state": "success", "message": "Document ingested and indexed — ready to query."}
+            return {"state": "error", "message": msg or "Ingestion job failed."}
+        return {"state": "running", "message": "Processing…"}
+    except Exception as e:
+        print(f"[upload/status] {e}")
+        return {"state": "error", "message": str(e)[:120]}

@@ -78,3 +78,75 @@ async def get_actions():
         })
 
     return {"data": out, "demo": False}
+
+
+# ── AI Insights ───────────────────────────────────────────────────────────────
+
+DEMO_ACTION_INSIGHT = (
+    "The action register has 3 overdue items including ACT-002 (WEM Capacity Mechanism submission, "
+    "Critical) which passed its April deadline and requires immediate escalation to the CEO. "
+    "The Yandin Stage 2 FID (ACT-003) and FY26 Budget approval (ACT-010) are the highest-value "
+    "pending items and should be progressed in parallel this month. "
+    "**Priority:** Schedule an emergency governance meeting to close ACT-002 and assign accountable executive."
+)
+
+
+def _run_sql_slow(sql: str) -> list:
+    tok = get_token()
+    wh = get_warehouse_id()
+    url = get_workspace_url()
+    if not tok or not wh:
+        return []
+    try:
+        r = requests.post(
+            f"{url}/api/2.0/sql/statements",
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+            json={"warehouse_id": wh, "statement": sql, "wait_timeout": "60s"},
+            timeout=75,
+        )
+        if not r.ok:
+            return []
+        d = r.json()
+        if d.get("status", {}).get("state") != "SUCCEEDED":
+            return []
+        result = d.get("result", {})
+        if not result.get("data_array"):
+            return []
+        cols = [c["name"] for c in d.get("manifest", {}).get("schema", {}).get("columns", [])]
+        return [dict(zip(cols, row)) for row in result["data_array"]]
+    except Exception as e:
+        print(f"[SQL/actions slow] {e}")
+        return []
+
+
+@router.get("/api/actions/ai_insights")
+async def actions_ai_insights():
+    """AI prioritisation narrative for the action register via ai_query."""
+    rows = _run_sql(f"""
+        SELECT action_id, title, owner, due_date, priority, status, business_unit
+        FROM {CATALOG}.eds_actions.action_items
+        ORDER BY CASE priority WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 ELSE 4 END,
+                 due_date
+        LIMIT 20
+    """)
+    use_demo = not rows
+    actions = DEMO_ACTIONS if use_demo else rows
+
+    overdue = [a for a in actions if a.get("due_date") and str(a.get("due_date", "")) < "2026-04-05" and a.get("status") not in ("Completed", "complete")]
+    critical = [a for a in actions if a.get("priority") in ("Critical", "critical")]
+    open_count = len([a for a in actions if a.get("status") in ("Open", "open")])
+
+    prompt = (
+        f"You are Alinta Energy's Board Secretary and Chief of Staff advisor. "
+        f"Action register: {len(actions)} total actions, {open_count} open, "
+        f"{len(overdue)} overdue: {[a['title'][:60] for a in overdue[:3]]}. "
+        f"Critical priority actions: {[a['title'][:60] for a in critical[:3]]}. "
+        "Provide a 3-sentence executive briefing: which actions pose the greatest governance risk if delayed, "
+        "recommended sequencing for the next 2 weeks, and any actions that should be escalated to the Board. "
+        "Be specific and action-oriented."
+    ).replace("'", "''")
+
+    result = _run_sql_slow(f"SELECT ai_query('databricks-claude-sonnet-4-6', '{prompt}') as insight")
+    if result and result[0].get("insight"):
+        return {"insight": str(result[0]["insight"]), "demo": False}
+    return {"insight": DEMO_ACTION_INSIGHT, "demo": True}

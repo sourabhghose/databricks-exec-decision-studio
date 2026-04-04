@@ -60,3 +60,100 @@ async def get_risks():
     if not rows:
         return {"data": DEMO_RISKS, "demo": True}
     return {"data": rows, "demo": False}
+
+
+# ── AI Insights ───────────────────────────────────────────────────────────────
+
+DEMO_RISK_INSIGHT = (
+    "The risk register shows two Critical-rated risks requiring board-level attention: WEM regulatory "
+    "uncertainty (Score 20) threatens generation asset economics, and Loy Yang B operational risk (Score 19) "
+    "reflects the consequences of ageing plant. Both require active management beyond current mitigations. "
+    "The $800M FY26 debt refinancing risk has moved to High and should be pre-emptively addressed before "
+    "market conditions tighten. **Recommended action:** CFO to present refinancing options at the next board meeting "
+    "alongside an updated LYB risk tolerance position."
+)
+
+
+def _run_sql_slow(sql: str) -> list:
+    tok = get_token()
+    wh = get_warehouse_id()
+    url = get_workspace_url()
+    if not tok or not wh:
+        return []
+    try:
+        r = requests.post(
+            f"{url}/api/2.0/sql/statements",
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+            json={"warehouse_id": wh, "statement": sql, "wait_timeout": "60s"},
+            timeout=75,
+        )
+        if not r.ok:
+            return []
+        d = r.json()
+        if d.get("status", {}).get("state") != "SUCCEEDED":
+            return []
+        result = d.get("result", {})
+        if not result.get("data_array"):
+            return []
+        cols = [c["name"] for c in d.get("manifest", {}).get("schema", {}).get("columns", [])]
+        return [dict(zip(cols, row)) for row in result["data_array"]]
+    except Exception as e:
+        print(f"[SQL/risks slow] {e}")
+        return []
+
+
+@router.get("/api/risks/ai_insights")
+async def risk_ai_insights(risk_id: str = ""):
+    """AI analysis for a specific risk or overall risk register via ai_query."""
+    if risk_id:
+        # Per-risk deep analysis
+        all_risks = DEMO_RISKS
+        rows = _run_sql(f"""
+            SELECT risk_id, category, description, likelihood, consequence,
+                   rating, risk_score, owner, mitigation, status
+            FROM {CATALOG}.eds_synthetic.risk_register
+            WHERE risk_id = '{risk_id.replace("'", "")}'
+        """)
+        if rows:
+            all_risks = rows
+        risk = next((r for r in all_risks if r.get("risk_id") == risk_id), None)
+        if not risk:
+            return {"insight": "Risk not found.", "demo": True}
+
+        prompt = (
+            f"You are Alinta Energy's Enterprise Risk Advisor. Analyse this risk: "
+            f"[{risk['rating']}] {risk['description']} "
+            f"Likelihood: {risk['likelihood']}, Consequence: {risk['consequence']}, "
+            f"Score: {risk['risk_score']}/25, Owner: {risk['owner']}. "
+            f"Current mitigation: {risk.get('mitigation', 'None stated')}. "
+            "Provide: (1) a 2-sentence assessment of whether the current mitigation is sufficient, "
+            "(2) one specific additional action to reduce this risk in the next 90 days, "
+            "(3) any early warning indicators to monitor. Be precise and commercially candid."
+        ).replace("'", "''")
+
+        result = _run_sql_slow(f"SELECT ai_query('databricks-claude-sonnet-4-6', '{prompt}') as insight")
+        if result and result[0].get("insight"):
+            return {"insight": str(result[0]["insight"]), "demo": False, "risk_id": risk_id}
+        return {"insight": f"Current mitigation for {risk_id}: {risk.get('mitigation', 'None stated')}. AI analysis unavailable.", "demo": True, "risk_id": risk_id}
+
+    # Overall risk register summary
+    rows = _run_sql(f"""
+        SELECT rating, COUNT(*) as cnt, MAX(risk_score) as max_score
+        FROM {CATALOG}.eds_synthetic.risk_register
+        GROUP BY rating ORDER BY max_score DESC
+    """)
+    if rows:
+        summary = ", ".join([f"{r['rating']}: {r['cnt']} risks" for r in rows])
+    else:
+        summary = "Critical: 2, High: 5, Medium: 3"
+
+    prompt = (
+        f"You are Alinta Energy's Chief Risk Officer advisor. Risk register summary: {summary}. "
+        "In 3 sentences: identify the dominant risk theme, the most urgent single action, "
+        "and whether the overall risk profile is improving or deteriorating. Be candid."
+    ).replace("'", "''")
+
+    result = _run_sql_slow(f"SELECT ai_query('databricks-claude-sonnet-4-6', '{prompt}') as insight")
+    if result and result[0].get("insight"):
+        return {"insight": str(result[0]["insight"]), "demo": False}
+    return {"insight": DEMO_RISK_INSIGHT, "demo": True}

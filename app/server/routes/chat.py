@@ -19,6 +19,7 @@ from server.config import (
     CATALOG,
     DOC_TITLES,
     LLM_ENDPOINT,
+    SUPERVISOR_ENDPOINT,
     TIER_MAP,
     VS_INDEX,
     get_token,
@@ -285,6 +286,51 @@ def _get_chart_data(query: str, intent: str) -> dict | None:
         }
 
     return None
+
+
+def _call_supervisor(query: str, history: list, role: str) -> str | None:
+    """
+    Try the MLflow-served Supervisor Agent (RAG chain) if SUPERVISOR_ENDPOINT is configured.
+    Accepts both OpenAI-chat format and MLflow pyfunc format responses.
+    Returns the answer string, or None if unavailable/failed.
+    """
+    if not SUPERVISOR_ENDPOINT:
+        return None
+    tok = get_token()
+    url = get_workspace_url()
+    if not tok:
+        return None
+    messages = [
+        *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in (history or [])[-6:]],
+        {"role": "user", "content": query},
+    ]
+    try:
+        r = requests.post(
+            f"{url}/serving-endpoints/{SUPERVISOR_ENDPOINT}/invocations",
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+            json={"messages": messages, "max_tokens": 1200, "temperature": 0.1},
+            timeout=90,
+        )
+        if not r.ok:
+            print(f"[SUPERVISOR] {r.status_code}: {r.text[:200]}")
+            return None
+        data = r.json()
+        # OpenAI-compatible chat format
+        if "choices" in data:
+            return data["choices"][0]["message"]["content"]
+        # MLflow pyfunc format
+        if "predictions" in data:
+            pred = data["predictions"]
+            if isinstance(pred, list) and pred:
+                p = pred[0]
+                if isinstance(p, str):
+                    return p
+                return p.get("output") or p.get("answer") or p.get("result") or str(p)
+        return None
+    except Exception as e:
+        print(f"[SUPERVISOR] Error: {e}")
+        return None
+
 
 router = APIRouter()
 
@@ -674,16 +720,35 @@ async def chat_stream(req: ChatRequest):
         {"role": "user", "content": req.message},
     ]
 
+    # Try Supervisor Agent (MLflow RAG chain) if configured — synchronous call, then stream result
+    supervisor_answer: str | None = None
+    effective_agent = intent
+    if tok and not use_demo:
+        supervisor_answer = _call_supervisor(req.message, req.history or [], req.role)
+        if supervisor_answer:
+            effective_agent = "supervisor"
+            print(f"[SUPERVISOR] Answer received ({len(supervisor_answer)} chars)")
+
     start = time.time()
 
     async def generate():
         full_answer = ""
 
         # Send metadata first
-        meta = {"type": "meta", "agent": intent, "sources": source_ids[:5]}
+        meta = {"type": "meta", "agent": effective_agent, "sources": source_ids[:5]}
         yield f"data: {json.dumps(meta)}\n\n"
 
-        if use_demo:
+        if supervisor_answer:
+            # Stream the supervisor answer word-by-word (same UX as demo mode)
+            import asyncio
+            full_answer = supervisor_answer
+            words = supervisor_answer.split(" ")
+            for i, word in enumerate(words):
+                sep = " " if i < len(words) - 1 else ""
+                yield f"data: {json.dumps({'type': 'token', 'content': word + sep})}\n\n"
+                if i % 8 == 0:
+                    await asyncio.sleep(0.008)
+        elif use_demo:
             # Stream pre-written demo response word-by-word
             import asyncio
             demo_text = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])

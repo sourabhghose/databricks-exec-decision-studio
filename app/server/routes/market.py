@@ -13,6 +13,23 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
+# ── TTL Cache ─────────────────────────────────────────────────────────────────
+
+_MARKET_CACHE: dict = {}
+_CACHE_TTL = {"news": 1800, "stocks": 3600, "carbon": 3600}  # seconds
+
+
+def _cache_get(key: str):
+    entry = _MARKET_CACHE.get(key)
+    if entry and time.time() - entry["ts"] < _CACHE_TTL.get(key, 1800):
+        return entry["data"]
+    return None
+
+
+def _cache_set(key: str, data) -> None:
+    _MARKET_CACHE[key] = {"ts": time.time(), "data": data}
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _get(url: str, params: dict = None, timeout: int = 10) -> dict | list | None:
@@ -115,6 +132,10 @@ def _sentiment_from_title(title: str) -> str:
 
 @router.get("/api/market/news")
 async def get_news():
+    cached = _cache_get("news")
+    if cached:
+        return cached
+
     data = _get(GDELT_URL, params={
         "query": GDELT_QUERY,
         "mode": "artlist",
@@ -153,9 +174,12 @@ async def get_news():
                 "sentiment": _sentiment_from_title(title),
                 "tags": tags[:4],
             })
-        return {"data": articles, "demo": False, "source": "GDELT"}
+        result = {"data": articles, "demo": False, "source": "GDELT"}
+        _cache_set("news", result)
+        return result
 
-    return {"data": DEMO_NEWS, "demo": True, "source": "demo"}
+    result = {"data": DEMO_NEWS, "demo": True, "source": "demo"}
+    return result
 
 
 # ── Stock prices ──────────────────────────────────────────────────────────────
@@ -223,6 +247,9 @@ def _fetch_stock(symbol: str, name: str, color: str) -> dict | None:
 
 @router.get("/api/market/stocks")
 async def get_stocks():
+    cached = _cache_get("stocks")
+    if cached:
+        return cached
     results = []
     for s in STOCKS:
         stock = _fetch_stock(s["symbol"], s["name"], s["color"])
@@ -230,7 +257,9 @@ async def get_stocks():
             results.append(stock)
 
     if results:
-        return {"data": results, "demo": False, "source": "Yahoo Finance", "as_of": datetime.now(timezone.utc).isoformat()}
+        out = {"data": results, "demo": False, "source": "Yahoo Finance", "as_of": datetime.now(timezone.utc).isoformat()}
+        _cache_set("stocks", out)
+        return out
 
     return {"data": DEMO_STOCKS, "demo": True, "source": "demo", "as_of": datetime.now(timezone.utc).isoformat()}
 

@@ -9,6 +9,8 @@ import {
   Activity,
   Users,
   Leaf,
+  Sparkles,
+  ChevronDown,
 } from "lucide-react";
 import {
   LineChart,
@@ -113,6 +115,9 @@ export default function KPIDashboard() {
   const [financials, setFinancials] = useState<FinancialRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [demo, setDemo] = useState(false);
+  const [aiInsight, setAiInsight] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [selectedKpi, setSelectedKpi] = useState<string | null>(null);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -138,6 +143,15 @@ export default function KPIDashboard() {
     } finally {
       setLoading(false);
     }
+
+    // Fetch AI insight in background
+    setAiLoading(true);
+    try {
+      const r = await fetch("/api/kpi/ai_insights");
+      const d = await r.json();
+      setAiInsight(d.insight || "");
+    } catch { /* non-critical */ }
+    finally { setAiLoading(false); }
   };
 
   useEffect(() => {
@@ -200,6 +214,24 @@ export default function KPIDashboard() {
           Refresh
         </button>
       </div>
+
+      {/* -- AI Insights Panel -- */}
+      {(aiLoading || aiInsight) && (
+        <div className="glass-card p-4 border border-amber-400/20 bg-amber-400/5">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={14} className="text-amber-400" />
+            <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">AI KPI Narrative · Claude Sonnet 4.6</span>
+          </div>
+          {aiLoading ? (
+            <div className="flex items-center gap-2 text-slate-400 text-sm">
+              <RefreshCw size={13} className="animate-spin" /> Generating executive insight…
+            </div>
+          ) : (
+            <p className="text-[13px] text-slate-300 leading-relaxed"
+               dangerouslySetInnerHTML={{ __html: aiInsight.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>') }} />
+          )}
+        </div>
+      )}
 
       {/* -- Summary cards -- */}
       <div className="grid grid-cols-4 gap-4">
@@ -322,14 +354,17 @@ export default function KPIDashboard() {
                 </tr>
               ) : (
                 kpis.map((kpi, i) => (
+                  <>
                   <tr
                     key={i}
-                    className={`border-b border-dark-border/50 transition-colors hover:bg-white/[0.02] ${
-                      i % 2 === 0 ? "bg-transparent" : "bg-white/[0.01]"
+                    onClick={() => setSelectedKpi(selectedKpi === kpi.kpi_name ? null : kpi.kpi_name)}
+                    className={`border-b border-dark-border/50 transition-colors cursor-pointer hover:bg-white/[0.03] ${
+                      selectedKpi === kpi.kpi_name ? "bg-amber-400/5" : i % 2 === 0 ? "bg-transparent" : "bg-white/[0.01]"
                     }`}
                   >
                     <td className="px-5 py-3 font-medium text-slate-200">
                       <div className="flex items-center gap-2">
+                        <ChevronDown size={12} className={`text-slate-600 transition-transform ${selectedKpi === kpi.kpi_name ? "rotate-0" : "-rotate-90"}`} />
                         {kpi.kpi_name}
                         {kpi.is_anomaly && (
                           <span title="Anomaly detected">
@@ -378,6 +413,32 @@ export default function KPIDashboard() {
                       </span>
                     </td>
                   </tr>
+                  {selectedKpi === kpi.kpi_name && (
+                    <tr key={`${i}-detail`} className="bg-amber-400/5 border-b border-dark-border/30">
+                      <td colSpan={7} className="px-5 py-3">
+                        {trends[kpi.kpi_name] ? (
+                          <div>
+                            <p className="text-[11px] text-amber-400 font-semibold uppercase tracking-wider mb-2">6-Period Trend</p>
+                            <div className="flex gap-3 flex-wrap">
+                              {trends[kpi.kpi_name].map((pt, idx) => (
+                                <div key={idx} className="text-center">
+                                  <div className="text-[10px] text-slate-500">{pt.period.slice(0, 7)}</div>
+                                  <div className="text-[13px] font-bold text-slate-200">{pt.value}</div>
+                                  <div className="text-[10px] text-slate-500">{pt.unit}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-500">
+                            Trend data available for Group EBITDA Margin, Retail Customer NPS, LYB Plant Availability, Retail Churn Rate.
+                            Use <strong className="text-gold">Strategic Chat</strong> to analyse this KPI in depth.
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </>
                 ))
               )}
             </tbody>

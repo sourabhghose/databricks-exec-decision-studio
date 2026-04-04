@@ -1,9 +1,10 @@
 """
 GET /api/audit — Audit trail of agent interactions, with demo fallback.
+GET /api/audit/chart — Confidence trend data by agent for charting.
 """
 
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from server.config import CATALOG, get_token, get_warehouse_id, get_workspace_url
 
@@ -96,7 +97,23 @@ def _run_sql(sql: str) -> list:
 
 
 @router.get("/api/audit")
-async def get_audit():
+async def get_audit(
+    agent: str = Query(default=""),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+):
+    filters = []
+    if agent:
+        safe_agent = agent.replace("'", "")
+        filters.append(f"agent_name = '{safe_agent}'")
+    if date_from:
+        safe_from = date_from[:10].replace("'", "")
+        filters.append(f"DATE(timestamp) >= '{safe_from}'")
+    if date_to:
+        safe_to = date_to[:10].replace("'", "")
+        filters.append(f"DATE(timestamp) <= '{safe_to}'")
+    where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
     rows = _run_sql(f"""
         SELECT DATE_FORMAT(timestamp, 'yyyy-MM-dd HH:mm:ss') as ts,
                user_tier, agent_name,
@@ -105,6 +122,7 @@ async def get_audit():
                latency_ms,
                is_policy_compliant
         FROM {CATALOG}.eds_audit.agent_interactions
+        {where}
         ORDER BY timestamp DESC
         LIMIT 50
     """)
@@ -125,3 +143,39 @@ async def get_audit():
         })
 
     return {"data": out, "demo": False}
+
+
+DEMO_AUDIT_CHART = [
+    {"agent_name": "doc_qa",       "avg_confidence": 0.87, "query_count": 8},
+    {"agent_name": "kpi_monitor",  "avg_confidence": 0.93, "query_count": 5},
+    {"agent_name": "briefing",     "avg_confidence": 0.81, "query_count": 3},
+    {"agent_name": "competitive",  "avg_confidence": 0.76, "query_count": 4},
+    {"agent_name": "strategic_gap","avg_confidence": 0.84, "query_count": 2},
+]
+
+
+@router.get("/api/audit/chart")
+async def audit_chart():
+    """Average confidence score per agent (last 30 days) for the trend chart."""
+    rows = _run_sql(f"""
+        SELECT agent_name,
+               ROUND(AVG(CAST(confidence_score AS DOUBLE)), 2) as avg_confidence,
+               COUNT(*) as query_count
+        FROM {CATALOG}.eds_audit.agent_interactions
+        WHERE timestamp >= DATE_SUB(CURRENT_DATE(), 30)
+        GROUP BY agent_name
+        ORDER BY query_count DESC
+    """)
+    if not rows:
+        return {"data": DEMO_AUDIT_CHART, "demo": True}
+    return {
+        "data": [
+            {
+                "agent_name": r.get("agent_name", ""),
+                "avg_confidence": float(r.get("avg_confidence", 0)),
+                "query_count": int(r.get("query_count", 0)),
+            }
+            for r in rows
+        ],
+        "demo": False,
+    }

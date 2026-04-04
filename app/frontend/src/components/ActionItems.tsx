@@ -5,6 +5,7 @@ import {
   Calendar,
   FileText,
   AlertCircle,
+  Sparkles,
 } from "lucide-react";
 
 interface Action {
@@ -57,6 +58,8 @@ export default function ActionItems() {
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
   const [demo, setDemo] = useState(false);
+  const [aiInsight, setAiInsight] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   const fetchActions = async () => {
     setLoading(true);
@@ -71,6 +74,14 @@ export default function ActionItems() {
     } finally {
       setLoading(false);
     }
+
+    setAiLoading(true);
+    try {
+      const r = await fetch("/api/actions/ai_insights");
+      const d = await r.json();
+      setAiInsight(d.insight || "");
+    } catch { /* non-critical */ }
+    finally { setAiLoading(false); }
   };
 
   useEffect(() => {
@@ -117,6 +128,24 @@ export default function ActionItems() {
           Refresh
         </button>
       </div>
+
+      {/* -- AI Insights -- */}
+      {(aiLoading || aiInsight) && (
+        <div className="glass-card p-4 border border-amber-400/20 bg-amber-400/5">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={14} className="text-amber-400" />
+            <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">AI Prioritisation · Claude Sonnet 4.6</span>
+          </div>
+          {aiLoading ? (
+            <div className="flex items-center gap-2 text-slate-400 text-sm">
+              <RefreshCw size={13} className="animate-spin" /> Analysing action register…
+            </div>
+          ) : (
+            <p className="text-[13px] text-slate-300 leading-relaxed"
+               dangerouslySetInnerHTML={{ __html: aiInsight.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>') }} />
+          )}
+        </div>
+      )}
 
       {/* -- Kanban Board -- */}
       {loading && actions.length === 0 ? (

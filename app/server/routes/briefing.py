@@ -8,10 +8,78 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List
 
-from server.config import LLM_ENDPOINT, get_token, get_workspace_url
+from server.config import CATALOG, LLM_ENDPOINT, get_token, get_warehouse_id, get_workspace_url
 from server.routes.kpi import DEMO_KPIS
 from server.routes.risks import DEMO_RISKS
 from server.routes.decisions import DEMO_DECISIONS  # type: ignore
+
+
+def _run_sql(sql: str) -> list:
+    tok = get_token()
+    wh = get_warehouse_id()
+    url = get_workspace_url()
+    if not tok or not wh:
+        return []
+    try:
+        r = requests.post(
+            f"{url}/api/2.0/sql/statements",
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+            json={"warehouse_id": wh, "statement": sql, "wait_timeout": "30s"},
+            timeout=35,
+        )
+        if not r.ok:
+            return []
+        d = r.json()
+        if d.get("status", {}).get("state") != "SUCCEEDED":
+            return []
+        result = d.get("result", {})
+        if not result.get("data_array"):
+            return []
+        cols = [c["name"] for c in d.get("manifest", {}).get("schema", {}).get("columns", [])]
+        return [dict(zip(cols, row)) for row in result["data_array"]]
+    except Exception as e:
+        print(f"[SQL/briefing] {e}")
+        return []
+
+
+def _get_live_kpis() -> list:
+    rows = _run_sql(f"""
+        SELECT kpi_name, business_unit,
+               ROUND(CAST(value AS DOUBLE), 2) as value, unit,
+               ROUND(CAST(target AS DOUBLE), 2) as target,
+               ROUND((CAST(value AS DOUBLE) - CAST(target AS DOUBLE))
+                 / NULLIF(ABS(CAST(target AS DOUBLE)), 0) * 100, 1) as pct,
+               is_anomaly
+        FROM {CATALOG}.eds_synthetic.kpi_timeseries
+        WHERE period = (SELECT MAX(period) FROM {CATALOG}.eds_synthetic.kpi_timeseries)
+        ORDER BY business_unit, kpi_name LIMIT 20
+    """)
+    if not rows:
+        return []
+    out = []
+    for r in rows:
+        pct = float(r.get("pct") or 0)
+        status = "Green" if abs(pct) < 5 else ("Red" if pct < -10 else "Yellow")
+        out.append({
+            "kpi_name": r["kpi_name"],
+            "business_unit": r.get("business_unit", ""),
+            "value": float(r.get("value", 0)),
+            "unit": r.get("unit", ""),
+            "target": float(r.get("target", 0)),
+            "pct_vs_target": pct,
+            "status": status,
+            "is_anomaly": str(r.get("is_anomaly", "")).lower() in ("true", "1"),
+        })
+    return out
+
+
+def _get_live_risks() -> list:
+    return _run_sql(f"""
+        SELECT risk_id, category, description, likelihood, consequence,
+               rating, risk_score, owner, mitigation, status
+        FROM {CATALOG}.eds_synthetic.risk_register
+        ORDER BY risk_score DESC LIMIT 10
+    """)
 
 router = APIRouter()
 
@@ -31,23 +99,28 @@ BRIEFING_TYPES = {
 
 
 def _build_context(focus_areas: list) -> str:
-    """Assemble structured data context for the LLM."""
+    """Assemble structured data context for the LLM. Tries live SQL, falls back to demo."""
     sections = []
 
     if "kpis" in focus_areas:
+        live_kpis = _get_live_kpis()
+        kpis_to_use = live_kpis if live_kpis else DEMO_KPIS
         kpi_lines = []
-        for k in DEMO_KPIS:
+        for k in kpis_to_use:
             status_emoji = "✅" if k["status"] == "Green" else ("⚠️" if k["status"] == "Yellow" else "🔴")
             anomaly = " [ANOMALY]" if k.get("is_anomaly") else ""
+            pct = k.get("pct_vs_target", 0)
             kpi_lines.append(
                 f"  {status_emoji} {k['kpi_name']} ({k['business_unit']}): "
                 f"{k['value']} {k['unit']} vs target {k['target']} {k['unit']} "
-                f"({k['pct_vs_target']:+.1f}%){anomaly}"
+                f"({pct:+.1f}%){anomaly}"
             )
         sections.append("## KPI SNAPSHOT (Latest Period)\n" + "\n".join(kpi_lines))
 
     if "risks" in focus_areas:
-        top_risks = sorted(DEMO_RISKS, key=lambda r: r["risk_score"], reverse=True)[:5]
+        live_risks = _get_live_risks()
+        risks_to_use = live_risks if live_risks else DEMO_RISKS
+        top_risks = sorted(risks_to_use, key=lambda r: float(r.get("risk_score", 0) or 0), reverse=True)[:5]
         risk_lines = []
         for r in top_risks:
             risk_lines.append(
