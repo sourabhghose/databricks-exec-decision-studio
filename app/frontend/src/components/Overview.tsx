@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, PieChart, Pie, Legend,
@@ -275,7 +276,7 @@ function QueryItems({ items }: { items: any[] }) {
   );
 }
 
-/** Right-side drawer for drilldown details. */
+/** Right-side drawer — rendered via portal at document.body to escape stacking contexts. */
 function DrilldownDrawer({
   metric,
   data,
@@ -289,71 +290,78 @@ function DrilldownDrawer({
 }) {
   const title = METRIC_LABELS[metric] || metric;
 
-  return (
+  const count = data?.items?.length ?? 0;
+  const countLabel = metric === "kpis" ? "KPIs" : metric === "risks" ? "Risks" : metric === "actions" ? "Actions" : "Queries";
+
+  return createPortal(
     <>
-      {/* Dark overlay */}
+      {/* Overlay */}
       <div
-        className="fixed inset-0 z-40 bg-black/50"
         onClick={onClose}
+        style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(2px)" }}
       />
 
-      {/* Drawer panel */}
-      <div className="fixed inset-y-0 right-0 z-50 w-[520px] flex flex-col bg-slate-900 border-l border-slate-700/50 shadow-2xl">
+      {/* Drawer */}
+      <div style={{
+        position: "fixed", top: 0, right: 0, bottom: 0, width: 540,
+        zIndex: 9999, background: "#0f172a", borderLeft: "1px solid #1e293b",
+        display: "flex", flexDirection: "column", boxShadow: "-8px 0 32px rgba(0,0,0,0.5)",
+      }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50 flex-shrink-0">
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-0.5">Drilldown</p>
-            <h3 className="text-[15px] font-bold text-white">{title}</h3>
+            <p style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 2 }}>Drill-Down</p>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>{title}</h3>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
+            style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid #1e293b", background: "transparent", color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             <X size={16} />
           </button>
         </div>
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {/* AI Analysis section */}
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={14} className="text-amber-400" />
-              <p className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">AI Analysis</p>
-            </div>
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
 
+          {/* AI Analysis */}
+          <div style={{ borderRadius: 12, border: "1px solid rgba(245,158,11,0.2)", background: "rgba(245,158,11,0.05)", padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <Sparkles size={14} color="#f59e0b" />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", letterSpacing: "0.08em" }}>AI Analysis · Claude Sonnet 4.6</span>
+            </div>
             {loading ? (
-              <div className="flex items-center gap-2 py-4 justify-center">
-                <RefreshCw size={16} className="text-amber-400 animate-spin" />
-                <p className="text-[12px] text-slate-400">Generating executive analysis…</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 0", justifyContent: "center" }}>
+                <RefreshCw size={16} color="#f59e0b" className="animate-spin" />
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>Generating executive analysis…</span>
               </div>
             ) : data?.analysis ? (
               <AnalysisText text={data.analysis} />
             ) : (
-              <p className="text-[12px] text-slate-500 italic">No analysis available.</p>
+              <span style={{ fontSize: 12, color: "#64748b", fontStyle: "italic" }}>No analysis available.</span>
             )}
           </div>
 
-          {/* Items section */}
-          {data && data.items.length > 0 && (
+          {/* Items list */}
+          {!loading && count > 0 && (
             <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                {data.items.length} {metric === "kpis" ? "KPIs" : metric === "risks" ? "Risks" : metric === "actions" ? "Actions" : "Queries"}
+              <p style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>
+                {count} {countLabel}
               </p>
-
-              {metric === "kpis" && <KpiItems items={data.items} />}
-              {metric === "risks" && <RiskItems items={data.items} />}
-              {metric === "actions" && <ActionItems items={data.items} />}
-              {metric === "queries" && <QueryItems items={data.items} />}
+              {metric === "kpis"    && <KpiItems    items={data!.items} />}
+              {metric === "risks"   && <RiskItems   items={data!.items} />}
+              {metric === "actions" && <ActionItems  items={data!.items} />}
+              {metric === "queries" && <QueryItems   items={data!.items} />}
             </div>
           )}
 
-          {data && data.items.length === 0 && !loading && (
-            <p className="text-[12px] text-slate-500 italic text-center py-4">No items to display.</p>
+          {!loading && count === 0 && data && (
+            <p style={{ fontSize: 12, color: "#64748b", fontStyle: "italic", textAlign: "center", padding: "16px 0" }}>No items to display.</p>
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
