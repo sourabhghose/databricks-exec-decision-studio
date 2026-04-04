@@ -296,18 +296,14 @@ with mlflow.start_run(run_name="eds_rag_chain_v1") as run:
     })
 
     # Log the primary (Tier 1) chain
-    try:
-        model_info = mlflow.langchain.log_model(
-            lc_model=chains[1],
-            artifact_path="rag_chain",
-            input_example=input_example,
-            registered_model_name=MODEL_NAME,
-        )
-        print(f"[OK] Model logged. Run ID: {run.info.run_id}")
-        print(f"[OK] Model URI: {model_info.model_uri}")
-    except Exception as e:
-        print(f"[WARN] MLflow model logging: {e}")
-        print("(Chain is functional — logging failed, likely due to serialisation constraints)")
+    model_info = mlflow.langchain.log_model(
+        lc_model=chains[1],
+        artifact_path="rag_chain",
+        input_example=input_example,
+        registered_model_name=MODEL_NAME,
+    )
+    print(f"[OK] Model logged. Run ID: {run.info.run_id}")
+    print(f"[OK] Model URI: {model_info.model_uri}")
 
     run_id = run.info.run_id
 
@@ -400,3 +396,5 @@ print(f"  MLflow model:       {MODEL_NAME}")
 print(f"  MLflow run ID:      {run_id}")
 print("="*65)
 print("\nNext step: Run notebooks/03_agents/ to deploy specialist agents.")
+
+dbutils.notebook.exit(f"model_uri={MODEL_NAME}")
