@@ -96,7 +96,7 @@ export default function App() {
   const [dark, setDark] = useState<boolean>(() => {
     const stored = localStorage.getItem("eds-theme");
     if (stored) return stored === "dark";
-    return false; // default: light (Alinta brand)
+    return true; // default: dark
   });
 
   useEffect(() => {

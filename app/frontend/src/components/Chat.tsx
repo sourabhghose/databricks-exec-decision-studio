@@ -7,6 +7,9 @@ import {
   Clock,
   Cpu,
   Gauge,
+  ThumbsUp,
+  FileDown,
+  Presentation,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -37,23 +40,82 @@ interface Message {
   sources?: string[];
   latency_ms?: number;
   chartData?: ChartData;
+  liked?: boolean;
 }
 
-const ROLES = [
-  "Board Director / CEO",
-  "CFO / C-Suite",
-  "Executive Leadership Team",
-  "Senior Management",
-  "All Staff",
-];
+const ROLE = "Board Director / CEO";
 
-const QUICK_QUERIES = [
-  { label: "Loy Yang B Options", query: "What are the strategic options and timeline for the Loy Yang B transition and retirement?" },
-  { label: "KPI Performance", query: "Summarise the latest KPI performance across all business units, highlighting any anomalies" },
-  { label: "Competitive Position", query: "How does Alinta's market position compare to Origin Energy, AGL, and Energy Australia?" },
-  { label: "1H FY25 Results", query: "What were the key financial results, variances from budget, and management commentary for 1H FY25?" },
-  { label: "Enterprise Risks", query: "What are the top enterprise risks this quarter and what mitigations are in place?" },
-  { label: "WA Renewables Brief", query: "Prepare an executive briefing on the WA renewables pipeline and Yandin Stage 2 investment case" },
+const SAMPLE_QUESTIONS: { category: string; color: string; questions: { label: string; query: string }[] }[] = [
+  {
+    category: "Strategy",
+    color: "#F47920",
+    questions: [
+      { label: "Loy Yang B timeline & options", query: "What are the strategic options and final decision timeline for the Loy Yang B transition? What does the Board need to decide and by when?" },
+      { label: "FY26 strategic priorities", query: "What are the top 3 strategic priorities for the Board to focus on in FY2026 and what key decisions are required?" },
+      { label: "Strategy vs AEMO ISP gaps", query: "Where are the biggest gaps between Alinta's current strategy and AEMO's Integrated System Plan projections?" },
+      { label: "Yandin Stage 2 status", query: "What is the current status, key milestones, and risk profile of the Yandin Stage 2 wind farm investment?" },
+      { label: "Renewables pipeline overview", query: "What is Alinta's total committed renewables pipeline, capex schedule, and expected generation output by FY28?" },
+      { label: "Battery storage strategy", query: "What is Alinta's battery storage strategy and how does it compare to the commitments made by Origin and AGL?" },
+    ],
+  },
+  {
+    category: "Financial Performance",
+    color: "#3b82f6",
+    questions: [
+      { label: "1H FY25 results summary", query: "Summarise the key financial results for 1H FY25. Where did we beat or miss budget and what are the key drivers?" },
+      { label: "EBITDA variance drivers", query: "What are the primary drivers of EBITDA variance from budget across Generation, Retail, and Trading in 1H FY25?" },
+      { label: "Balance sheet & debt headroom", query: "What is our current Net Debt/EBITDA ratio, covenant headroom, and when is the $800M debt refinancing due?" },
+      { label: "FY26 budget assumptions", query: "What are the key assumptions underpinning the FY26 budget and where are the main upside/downside sensitivities?" },
+      { label: "Capital allocation priorities", query: "How is capital being allocated across Yandin Stage 2, LYB life extension, Retail Transformation, and dividends in FY26?" },
+      { label: "Dividend sustainability", query: "Is the 60% dividend payout ratio sustainable given our capex commitments and debt refinancing schedule?" },
+    ],
+  },
+  {
+    category: "Risk & Governance",
+    color: "#ef4444",
+    questions: [
+      { label: "Top enterprise risks", query: "What are the top enterprise risks this quarter, their ratings, and what mitigations are in place for each?" },
+      { label: "Carbon liability exposure", query: "What is Alinta's total Scope 1 carbon liability at current ACCU prices and how does this change under forward price trajectories to 2035?" },
+      { label: "WEM regulatory risk", query: "What is the financial impact of WEM capacity mechanism uncertainty on Alinta's generation revenue and how are we positioned?" },
+      { label: "Cyber & OT security posture", query: "How prepared are we for an OT/SCADA cyber attack on Loy Yang B or Yandin? What is the status of the cybersecurity uplift program?" },
+      { label: "LYB unplanned outage risk", query: "What is the probability and financial impact of an unplanned extended outage at Loy Yang B, and what contingency plans exist?" },
+      { label: "Risks to FY26 budget", query: "What are the key risks that could prevent us achieving the FY26 EBITDA target of $290M and how are they being managed?" },
+    ],
+  },
+  {
+    category: "Competitive Intelligence",
+    color: "#8b5cf6",
+    questions: [
+      { label: "NPS gap vs competitors", query: "What is Alinta's NPS gap versus Energy Australia and ERM Power, what is driving it, and what is the plan to close it within 18 months?" },
+      { label: "National market share trend", query: "How is Alinta's national retail market share trending and what is driving the movement in customer acquisition and churn?" },
+      { label: "AGL & Origin strategic moves", query: "What are AGL Energy and Origin Energy's key strategic moves in the last quarter and how should Alinta respond?" },
+      { label: "Digital disruptor threat", query: "How significant is the threat from digital-native retailers like Amber Electric? What customer segments are most at risk?" },
+      { label: "WA vs Eastern seaboard position", query: "How does Alinta's competitive position in WA compare to our Eastern seaboard penetration strategy and where should we prioritise?" },
+      { label: "ASX peer comparison", query: "How does Alinta compare to Origin Energy and AGL on key financial and operational metrics? Where are we ahead and where are we behind?" },
+    ],
+  },
+  {
+    category: "ESG & Carbon",
+    color: "#22c55e",
+    questions: [
+      { label: "Net Zero pathway status", query: "What is Alinta's current progress against the Net Zero by 2045 pathway? Are we on track and what are the critical decision points?" },
+      { label: "Scope 1 intensity trajectory", query: "What is our current Scope 1 emissions intensity and what is the projected trajectory under each LYB retirement scenario?" },
+      { label: "LGC revenue from Yandin 2", query: "How much LGC revenue will Yandin Stage 2 generate once commissioned and how does this improve our renewable certificate position?" },
+      { label: "ESG ratings vs peers", query: "How does Alinta's ESG rating compare to Origin and AGL? What are the key areas where we need to improve our disclosure?" },
+      { label: "Climate scenario analysis", query: "What does the climate scenario analysis show for Alinta's generation portfolio under 1.5°C and 2°C pathways?" },
+    ],
+  },
+  {
+    category: "Operations & People",
+    color: "#f59e0b",
+    questions: [
+      { label: "LYB plant availability & risks", query: "How is Loy Yang B plant availability tracking against target and are there any near-term unplanned outage risks from the aging fleet?" },
+      { label: "Retail churn & NPS recovery", query: "What is the current retail churn rate, what interventions are underway, and when do we expect to see NPS improvement?" },
+      { label: "Retail Transformation milestones", query: "What are the key milestones for the $45M Retail Transformation Program and are we on track to deliver the NPS improvement by FY27?" },
+      { label: "Safety performance", query: "How is our TRIFR safety metric performing, what is driving the improvement, and are there any serious injury or fatality risks?" },
+      { label: "Executive talent & succession", query: "What are the key talent risks in the executive leadership team and what succession plans are in place for critical roles?" },
+    ],
+  },
 ];
 
 const DOC_TITLES: Record<string, string> = {
@@ -143,15 +205,48 @@ function agentLabel(agent: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function renderMarkdown(text: string): string {
-  let html = text
+function buildHtmlTable(lines: string[]): string {
+  const isSepRow = (l: string): boolean => {
+    const inner = l.trim().replace(/^\|/, "").replace(/\|$/, "");
+    return inner.split("|").every((c) => /^\s*[-:\s]+\s*$/.test(c));
+  };
+  const parseRow = (line: string): string[] => {
+    const inner = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+    return inner.split("|").map((c) => c.trim());
+  };
+  const inlineFmt = (c: string) =>
+    c.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  const rows = lines.filter((l) => l.trim());
+  if (!rows.length) return "";
+
+  const hasHeader = rows.length >= 2 && isSepRow(rows[1]);
+  let html = '<div class="md-table-wrap"><table class="md-table">';
+
+  if (hasHeader) {
+    html += `<thead><tr>${parseRow(rows[0]).map((h) => `<th>${inlineFmt(h)}</th>`).join("")}</tr></thead><tbody>`;
+    for (let i = 2; i < rows.length; i++) {
+      if (!isSepRow(rows[i]))
+        html += `<tr>${parseRow(rows[i]).map((c) => `<td>${inlineFmt(c)}</td>`).join("")}</tr>`;
+    }
+  } else {
+    html += "<tbody>";
+    for (const row of rows) {
+      if (!isSepRow(row))
+        html += `<tr>${parseRow(row).map((c) => `<td>${inlineFmt(c)}</td>`).join("")}</tr>`;
+    }
+  }
+  return html + "</tbody></table></div>";
+}
+
+function processTextBlock(raw: string): string {
+  let html = raw
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+  html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+  html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
@@ -162,15 +257,93 @@ function renderMarkdown(text: string): string {
   html = html.replace(/\n/g, "<br/>");
   html = html.replace(/<p><\/p>/g, "");
   html = html.replace(/<p><br\/>/g, "<p>");
-
   return html;
+}
+
+function renderMarkdown(text: string): string {
+  const lines = text.split("\n");
+  const parts: { kind: "text" | "table"; lines: string[] }[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^\s*\|.+\|/.test(lines[i])) {
+      const tl: string[] = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) tl.push(lines[i++]);
+      parts.push({ kind: "table", lines: tl });
+    } else {
+      const tl: string[] = [];
+      while (i < lines.length && !/^\s*\|.+\|/.test(lines[i])) tl.push(lines[i++]);
+      if (tl.length) parts.push({ kind: "text", lines: tl });
+    }
+  }
+  return parts
+    .map((p) =>
+      p.kind === "table"
+        ? buildHtmlTable(p.lines.map((l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")))
+        : processTextBlock(p.lines.join("\n"))
+    )
+    .join("");
+}
+
+function downloadAsPDF(msg: Message) {
+  const content = renderMarkdown(msg.content);
+  const agentLabel = msg.agent ? msg.agent.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Strategic Intelligence";
+  const dateStr = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) return;
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Executive Decision Studio</title><style>
+    @page{margin:20mm}body{font-family:Arial,sans-serif;font-size:12pt;color:#1e293b;line-height:1.6}
+    .header{border-bottom:3px solid #F47920;padding-bottom:12px;margin-bottom:20px}
+    .brand{color:#F47920;font-size:11pt;font-weight:700;letter-spacing:.05em}
+    .meta{font-size:10pt;color:#64748b;margin-top:4px}
+    h1,h2,h3{color:#F47920}h2{font-size:14pt;margin-top:20pt}h3{font-size:12pt}
+    p{margin:8pt 0}strong{color:#0f172a}
+    code{background:#f1f5f9;padding:1px 4px;border-radius:3px;font-family:monospace;font-size:10pt}
+    .md-table-wrap{overflow-x:auto;margin:12pt 0}
+    table.md-table{width:100%;border-collapse:collapse;font-size:11pt}
+    table.md-table th{background:#fff3e8;color:#c4611a;border:1px solid #e2e8f0;padding:8px 10px;text-align:left;font-weight:600}
+    table.md-table td{border:1px solid #e2e8f0;padding:7px 10px}
+    table.md-table tr:nth-child(even) td{background:#f8fafc}
+    ul{padding-left:18px;margin:8pt 0}li{margin:3pt 0}
+    .sources{margin-top:24pt;padding-top:12pt;border-top:1px solid #e2e8f0;font-size:10pt;color:#64748b}
+    .footer{margin-top:24pt;padding-top:12pt;text-align:center;font-size:9pt;color:#94a3b8;border-top:1px solid #f1f5f9}
+  </style></head><body>
+    <div class="header"><div class="brand">ALINTA ENERGY · EXECUTIVE DECISION STUDIO</div>
+    <div class="meta">${agentLabel} · ${dateStr}</div></div>
+    <div class="content">${content}</div>
+    ${msg.sources?.length ? `<div class="sources"><strong>Source Documents:</strong> ${msg.sources.join(" · ")}</div>` : ""}
+    <div class="footer">Confidential · Executive Decision Studio · Alinta Energy</div>
+    <script>window.onload=function(){window.print();setTimeout(()=>window.close(),1500)}<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
+async function downloadAsPPTX(msg: Message) {
+  const res = await fetch("/api/export/pptx", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: msg.content,
+      agent: msg.agent || "Strategic Intelligence",
+      sources: msg.sources || [],
+    }),
+  });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `executive-briefing-${new Date().toISOString().split("T")[0]}.pptx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [role, setRole] = useState(ROLES[0]);
   const [loading, setLoading] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -204,7 +377,7 @@ export default function Chat() {
             role: m.role,
             content: m.content,
           })),
-          role,
+          role: ROLE,
         }),
       });
 
@@ -288,6 +461,12 @@ export default function Chat() {
     }
   };
 
+  const likeMessage = (index: number) => {
+    setMessages((prev) =>
+      prev.map((m, i) => (i === index ? { ...m, liked: !m.liked } : m))
+    );
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -298,52 +477,60 @@ export default function Chat() {
   return (
     <div className="flex gap-5 h-[calc(100vh-160px)]">
       {/* -- Left Sidebar -- */}
-      <div className="w-72 flex-shrink-0 flex flex-col gap-4">
-        {/* Role selector */}
-        <div className="glass-card p-4">
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 block">
-            Access Tier
-          </label>
-          <div className="flex flex-col gap-1.5">
-            {ROLES.map((r) => (
-              <button
-                key={r}
-                onClick={() => setRole(r)}
-                className={`text-left px-3 py-2 rounded-lg border text-xs transition-all cursor-pointer
-                  ${role === r
-                    ? "bg-gold/10 border-gold/30 text-gold font-medium"
-                    : "border-dark-border text-slate-400 hover:text-slate-200 hover:border-slate-600"
-                  }`}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Quick queries */}
-        <div className="glass-card p-4 flex-1 overflow-y-auto">
+      <div className="w-72 flex-shrink-0 flex flex-col gap-3">
+        {/* Sample questions header */}
+        <div className="glass-card p-4 flex-1 overflow-y-auto min-h-0">
           <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 block">
-            Quick Queries
+            Sample Questions
           </label>
-          <div className="flex flex-col gap-2">
-            {QUICK_QUERIES.map((q) => (
-              <button
-                key={q.label}
-                onClick={() => sendMessage(q.query)}
-                disabled={loading}
-                className="text-left text-sm px-3 py-2 rounded-lg border border-dark-border
-                  text-slate-300 hover:text-gold hover:border-gold/30 hover:bg-gold/5
-                  transition-all duration-200 disabled:opacity-40 cursor-pointer"
-              >
-                {q.label}
-              </button>
-            ))}
+
+          <div className="space-y-1">
+            {SAMPLE_QUESTIONS.map((cat) => {
+              const isOpen = activeCategory === cat.category;
+              return (
+                <div key={cat.category}>
+                  {/* Category header */}
+                  <button
+                    onClick={() => setActiveCategory(isOpen ? null : cat.category)}
+                    className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg
+                      text-[11px] font-semibold uppercase tracking-wider transition-colors cursor-pointer
+                      hover:bg-white/5"
+                    style={{ color: cat.color }}
+                  >
+                    <span>{cat.category}</span>
+                    <span className="text-slate-500 font-normal normal-case tracking-normal text-[10px]">
+                      {isOpen ? "▲" : "▼"}
+                    </span>
+                  </button>
+
+                  {/* Questions */}
+                  {isOpen && (
+                    <div className="flex flex-col gap-1 mt-1 mb-2 pl-1">
+                      {cat.questions.map((q) => (
+                        <button
+                          key={q.label}
+                          onClick={() => { sendMessage(q.query); setActiveCategory(null); }}
+                          disabled={loading}
+                          className="text-left text-[12px] px-3 py-2 rounded-lg border border-dark-border
+                            text-slate-300 hover:border-opacity-50 hover:bg-white/5
+                            transition-all duration-150 disabled:opacity-40 cursor-pointer leading-snug"
+                          style={{ borderColor: "rgba(255,255,255,0.07)" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.borderColor = cat.color + "55")}
+                          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)")}
+                        >
+                          {q.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* Session stats */}
-        <div className="glass-card p-4">
+        <div className="glass-card p-4 flex-shrink-0">
           <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 block">
             Session
           </label>
@@ -353,8 +540,8 @@ export default function Chat() {
               <span className="text-slate-200">{messages.length}</span>
             </div>
             <div className="flex justify-between">
-              <span>Role</span>
-              <span className="text-gold text-xs">{role.split(" / ")[0]}</span>
+              <span>Access</span>
+              <span className="text-[11px]" style={{ color: "#F47920" }}>Board / CEO</span>
             </div>
           </div>
         </div>
@@ -467,6 +654,43 @@ export default function Chat() {
                       ))}
                     </div>
                   )}
+
+                {/* Like + Download actions */}
+                {msg.role === "assistant" && msg.content && (
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-dark-border/30">
+                    <button
+                      onClick={() => likeMessage(i)}
+                      title={msg.liked ? "Unlike" : "Like this response"}
+                      className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border transition-all cursor-pointer
+                        ${msg.liked
+                          ? "bg-gold/15 border-gold/40 text-gold"
+                          : "border-dark-border/50 text-slate-500 hover:text-gold hover:border-gold/30"}`}
+                    >
+                      <ThumbsUp size={11} />
+                      {msg.liked ? "Liked" : "Like"}
+                    </button>
+                    {msg.liked && (
+                      <>
+                        <button
+                          onClick={() => downloadAsPDF(msg)}
+                          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-dark-border/50 text-slate-400 hover:text-blue-400 hover:border-blue-400/40 transition-all cursor-pointer"
+                          title="Download as PDF (print dialog)"
+                        >
+                          <FileDown size={11} />
+                          PDF
+                        </button>
+                        <button
+                          onClick={() => downloadAsPPTX(msg)}
+                          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-dark-border/50 text-slate-400 hover:text-orange-400 hover:border-orange-400/40 transition-all cursor-pointer"
+                          title="Download as PowerPoint"
+                        >
+                          <Presentation size={11} />
+                          PPTX
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {msg.role === "user" && (

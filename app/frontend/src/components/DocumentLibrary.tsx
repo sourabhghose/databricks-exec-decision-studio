@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   FileText,
   FileSpreadsheet,
@@ -11,6 +11,9 @@ import {
   X,
   ChevronDown,
   Database,
+  Upload,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react";
 
 interface Document {
@@ -149,6 +152,8 @@ function DocModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
   );
 }
 
+type UploadStatus = "idle" | "uploading" | "success" | "error";
+
 export default function DocumentLibrary() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [demo, setDemo] = useState(false);
@@ -160,6 +165,33 @@ export default function DocumentLibrary() {
   const [filterType, setFilterType] = useState<string | null>(null);
   const [selected, setSelected] = useState<Document | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
+  const [uploadMsg, setUploadMsg] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleUpload(file: File) {
+    setUploadStatus("uploading");
+    setUploadMsg(`Uploading "${file.name}"…`);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("tier", "4");
+      form.append("classification", "INTERNAL");
+      const r = await fetch("/api/documents/upload", { method: "POST", body: form });
+      const data = await r.json();
+      if (!r.ok || data.error) {
+        setUploadStatus("error");
+        setUploadMsg(data.error || "Upload failed.");
+      } else {
+        setUploadStatus("success");
+        setUploadMsg(data.message || `"${file.name}" uploaded. Available for querying in ~2 min.`);
+        setTimeout(() => setUploadStatus("idle"), 8000);
+      }
+    } catch {
+      setUploadStatus("error");
+      setUploadMsg("Network error — upload failed.");
+    }
+  }
 
   useEffect(() => {
     fetch("/api/documents")
@@ -216,6 +248,37 @@ export default function DocumentLibrary() {
     <div className="space-y-5">
       {selected && <DocModal doc={selected} onClose={() => setSelected(null)} />}
 
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept=".pdf,.pptx,.xlsx,.txt,.docx,.csv"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleUpload(f);
+          e.target.value = "";
+        }}
+      />
+
+      {/* Upload toast */}
+      {uploadStatus !== "idle" && (
+        <div
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm animate-slide-up
+            ${uploadStatus === "uploading" ? "bg-blue-500/10 border-blue-500/30 text-blue-300" : ""}
+            ${uploadStatus === "success"   ? "bg-green-500/10 border-green-500/30 text-green-300" : ""}
+            ${uploadStatus === "error"     ? "bg-red-500/10 border-red-500/30 text-red-300" : ""}`}
+        >
+          {uploadStatus === "uploading" && <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
+          {uploadStatus === "success"   && <CheckCircle size={16} />}
+          {uploadStatus === "error"     && <AlertCircle size={16} />}
+          <span className="flex-1">{uploadMsg}</span>
+          <button onClick={() => setUploadStatus("idle")} className="text-current opacity-60 hover:opacity-100 cursor-pointer">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -229,9 +292,20 @@ export default function DocumentLibrary() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <Database size={12} />
-          <span>Unity Catalog Volume · {stats.total} docs ingested</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Database size={12} />
+            <span>Unity Catalog Volume · {stats.total} docs ingested</span>
+          </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadStatus === "uploading"}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer
+              bg-gold/10 text-gold border-gold/30 hover:bg-gold/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Upload size={13} />
+            Upload Document
+          </button>
         </div>
       </div>
 

@@ -190,6 +190,40 @@ html.dark .status-red { color: #f87171; }
   color: var(--accent);
 }
 
+/* ── Markdown tables ─────────────────────────────────────────────────────── */
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 0.6em 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+table.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+table.md-table th {
+  background: var(--accent-light);
+  color: var(--accent-dark);
+  padding: 7px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.82em;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+table.md-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  vertical-align: top;
+  line-height: 1.5;
+}
+table.md-table tr:last-child td { border-bottom: none; }
+table.md-table tr:nth-child(even) td { background: var(--surface-2); }
+table.md-table strong { color: var(--text-1); }
+
 /* ── Utilities ───────────────────────────────────────────────────────────── */
 .line-clamp-2 {
   display: -webkit-box;

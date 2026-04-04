@@ -1,5 +1,5 @@
 # Executive Decision Studio — Project Status
-**Last updated:** 2026-04-04
+**Last updated:** 2026-04-04 (session 3)
 
 ---
 
@@ -96,8 +96,11 @@ Each file: `{doc_id}.txt` with YAML frontmatter + full document text.
 - **AI Briefing** — SSE streaming with 4 briefing types (Weekly, Board, Investor, Crisis), markdown rendering, `.md` export
 - **Document Library** — 22-doc grid with classification badges, tier labels, format icons, 4-dimension filter panel, click-to-expand modal
 - **Market Intelligence** — 3-panel tab: competitor/regulatory news (GDELT, live), ASX peer stocks with sparklines (Yahoo Finance, live), ACCU/LGC carbon prices with trend charts + strategic implications (CER quarterly)
-- **Role selector** — flat button list (no dropdown, avoids clipping bug)
-- Alinta Energy brand: orange `#F47920`, light mode default, dark mode toggle
+- **Markdown table rendering** — LLM `|pipe|tables|` parsed into proper `<table>` HTML with `thead`/`tbody`, striped rows, Alinta-themed headers
+- **Like → Export** — ThumbsUp button on each assistant message; when liked, reveals PDF (browser print) and PPTX (python-pptx via `/api/export/pptx`) download buttons
+- **Document Upload** — "Upload Document" button in Document Library header; uploads file to `UC Volume /tier4/`, triggers ingestion job 950647315295103; shows progress/success/error toast
+- **32 C-level sample questions** — 6 color-coded categories replace role dropdown in Strategic Chat sidebar
+- Alinta Energy brand: orange `#F47920`, **dark mode default**, light/dark toggle
 - Code-split chunks: `vendor`, `charts` (540 KB recharts), `icons`
 
 ---
@@ -115,10 +118,12 @@ Each file: `{doc_id}.txt` with YAML frontmatter + full document text.
 | `/api/actions` | GET | Action items |
 | `/api/audit` | GET | Audit log |
 | `/api/documents` | GET | Document catalog (22 docs with metadata) |
+| `/api/documents/upload` | POST | Upload document to UC Volume + trigger ingestion job 950647315295103 |
 | `/api/briefing/stream` | POST | SSE streaming executive briefing |
 | `/api/market/news` | GET | Competitor & regulatory news (GDELT, free, no key) |
 | `/api/market/stocks` | GET | ASX peer stock comparison (Yahoo Finance, free, no key) |
 | `/api/market/carbon` | GET | ACCU/LGC carbon market prices (CER quarterly data) |
+| `/api/export/pptx` | POST | Export chat response as branded PPTX (python-pptx) |
 | `/api/health` | GET | Health check |
 
 ### Live data status

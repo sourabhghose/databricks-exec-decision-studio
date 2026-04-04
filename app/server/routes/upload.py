@@ -1,0 +1,113 @@
+"""
+POST /api/documents/upload — Upload a document to the UC Volume and trigger ingestion.
+"""
+
+import os
+import uuid
+from datetime import datetime
+
+import requests
+from fastapi import APIRouter, UploadFile, File, Form
+from fastapi.responses import JSONResponse
+
+from server.config import CATALOG, get_token, get_warehouse_id, get_workspace_url
+
+router = APIRouter()
+
+VOLUME_ROOT = f"/Volumes/{CATALOG}/eds_raw/documents"
+INGESTION_JOB_ID = 950647315295103  # [EDS] 01 - Document Ingestion & Embedding
+
+
+def _files_api_upload(token: str, workspace_url: str, volume_path: str, content: bytes) -> bool:
+    """Upload bytes to a UC Volume via the Databricks Files API."""
+    url = f"{workspace_url}/api/2.0/fs/files{volume_path}"
+    try:
+        r = requests.put(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            data=content,
+            timeout=60,
+        )
+        if r.ok:
+            return True
+        print(f"[upload] Files API {r.status_code}: {r.text[:200]}")
+        return False
+    except Exception as e:
+        print(f"[upload] Files API error: {e}")
+        return False
+
+
+def _trigger_ingestion(token: str, workspace_url: str) -> str | None:
+    """Fire-and-forget: trigger the ingestion job. Returns run_id or None."""
+    try:
+        r = requests.post(
+            f"{workspace_url}/api/2.1/jobs/run-now",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"job_id": INGESTION_JOB_ID},
+            timeout=15,
+        )
+        if r.ok:
+            run_id = r.json().get("run_id")
+            print(f"[upload] Triggered ingestion job, run_id={run_id}")
+            return str(run_id)
+    except Exception as e:
+        print(f"[upload] Job trigger error: {e}")
+    return None
+
+
+@router.post("/api/documents/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    tier: int = Form(default=4),
+    classification: str = Form(default="INTERNAL"),
+):
+    """
+    Accept a document upload, write it to the Unity Catalog Volume,
+    then trigger the ingestion job so it becomes searchable in ~2 min.
+    """
+    if not file.filename:
+        return JSONResponse(status_code=400, content={"error": "No filename provided."})
+
+    tok = get_token()
+    url = get_workspace_url()
+
+    if not tok:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "No Databricks auth token available. Upload requires live backend."},
+        )
+
+    # Read file content
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:  # 50 MB limit
+        return JSONResponse(status_code=413, content={"error": "File too large (max 50 MB)."})
+
+    # Normalise filename: strip spaces, ensure safe chars
+    safe_name = file.filename.replace(" ", "_")
+    volume_path = f"{VOLUME_ROOT}/tier{tier}/{safe_name}"
+
+    # Upload to volume
+    ok = _files_api_upload(tok, url, volume_path, content)
+    if not ok:
+        return JSONResponse(
+            status_code=502,
+            content={"error": "Failed to upload to Unity Catalog Volume. Check token permissions."},
+        )
+
+    # Trigger ingestion job (async — doesn't block response)
+    run_id = _trigger_ingestion(tok, url)
+
+    return {
+        "success": True,
+        "filename": safe_name,
+        "volume_path": volume_path,
+        "tier": tier,
+        "size_kb": round(len(content) / 1024, 1),
+        "run_id": run_id,
+        "message": (
+            f"'{safe_name}' uploaded to Tier {tier} volume. "
+            "Ingestion job triggered — document will be available for querying in approximately 2–3 minutes."
+            if run_id
+            else f"'{safe_name}' uploaded to Tier {tier} volume. Manually run the ingestion job to index it."
+        ),
+    }
