@@ -278,21 +278,13 @@ VS_INDEX = "{VS_INDEX}"
 LLM_ENDPOINT = "{LLM_ENDPOINT}"
 
 def extract_question(input_data):
-    """Normalise all input formats to a plain question string.
-
-    Handles:
-      - plain str: "question"
-      - MLflow dataframe mapping: {"messages": "question"}
-      - OpenAI messages list: {"messages": [{"role": "user", "content": "..."}]}
-    """
+    """Normalise all input formats to a plain question string."""
     if isinstance(input_data, str):
         return input_data
     if isinstance(input_data, dict):
         messages = input_data.get("messages", None)
-        # MLflow maps column value directly — may be a plain string
         if isinstance(messages, str):
             return messages
-        # Standard OpenAI messages list
         if isinstance(messages, list) and messages:
             for msg in reversed(messages):
                 if isinstance(msg, str):
