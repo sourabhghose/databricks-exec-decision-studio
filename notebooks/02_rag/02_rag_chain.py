@@ -277,6 +277,24 @@ VS_ENDPOINT = "{VS_ENDPOINT}"
 VS_INDEX = "{VS_INDEX}"
 LLM_ENDPOINT = "{LLM_ENDPOINT}"
 
+def extract_question(input_data):
+    """Accept either a plain string or {{"messages": [{{"role": ..., "content": ...}}]}} dict."""
+    if isinstance(input_data, str):
+        return input_data
+    if isinstance(input_data, dict):
+        messages = input_data.get("messages", [])
+        if messages:
+            # Take the last user message
+            for msg in reversed(messages):
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "user" and content:
+                    return content
+            # Fallback: last message content regardless of role
+            return messages[-1].get("content", "")
+        return input_data.get("query", input_data.get("question", str(input_data)))
+    return str(input_data)
+
 def build_chain():
     vectorstore = DatabricksVectorSearch(
         endpoint=VS_ENDPOINT,
@@ -303,7 +321,8 @@ def build_chain():
         )
 
     return (
-        {{"context": retriever | format_docs, "question": RunnablePassthrough()}}
+        RunnableLambda(extract_question)
+        | {{"context": retriever | format_docs, "question": RunnablePassthrough()}}
         | prompt
         | llm
         | StrOutputParser()
@@ -318,10 +337,15 @@ chain_file.write(CHAIN_CODE)
 chain_file.close()
 
 from mlflow.models.signature import infer_signature
+from mlflow.models import ModelSignature
+from mlflow.types.schema import Schema, ColSpec, Array, Object, Property
+
+# Explicit signature: messages array in, string out
+input_schema = Schema([ColSpec("string", "messages")])
+output_schema = Schema([ColSpec("string")])
+signature = ModelSignature(inputs=input_schema, outputs=output_schema)
 
 input_example = {"messages": [{"role": "user", "content": "What is Alinta's strategy for Loy Yang B?"}]}
-sample_output = "Alinta Energy's strategy for Loy Yang B focuses on optimising asset performance while evaluating long-term transition options."
-signature = infer_signature(input_example, sample_output)
 
 print(f"\nLogging RAG chain to MLflow Unity Catalog model registry (models-from-code)...")
 
