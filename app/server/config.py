@@ -68,7 +68,7 @@ _wh_cache: dict = {}
 
 def get_token() -> str:
     """Get bearer token for Databricks API calls."""
-    if _token_cache.get("val") is not None:
+    if _token_cache.get("val"):  # only cache non-empty tokens
         return _token_cache["val"]
 
     tok = os.environ.get("DATABRICKS_TOKEN", "")

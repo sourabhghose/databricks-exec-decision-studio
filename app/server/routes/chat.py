@@ -697,6 +697,7 @@ async def chat_stream(req: ChatRequest):
         else:
             # Stream from Databricks LLM endpoint
             try:
+                import asyncio
                 async with httpx.AsyncClient(timeout=120) as client:
                     async with client.stream(
                         "POST",
@@ -704,6 +705,9 @@ async def chat_stream(req: ChatRequest):
                         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
                         json={"messages": messages, "max_tokens": 1200, "temperature": 0.1, "stream": True},
                     ) as response:
+                        if response.status_code != 200:
+                            body = await response.aread()
+                            raise RuntimeError(f"LLM {response.status_code}: {body[:300]}")
                         async for line in response.aiter_lines():
                             if line.startswith("data: "):
                                 chunk = line[6:]
@@ -717,7 +721,13 @@ async def chat_stream(req: ChatRequest):
                                         yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
                                 except Exception:
                                     pass
+
+                # If LLM produced nothing (empty stream), fall back to demo
+                if not full_answer:
+                    raise RuntimeError("LLM returned empty stream")
+
             except Exception as e:
+                print(f"[CHAT] LLM stream error, falling back to demo: {e}")
                 # Fallback to demo on any streaming error
                 import asyncio
                 demo_text = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
