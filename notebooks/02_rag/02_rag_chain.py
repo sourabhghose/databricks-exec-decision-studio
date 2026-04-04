@@ -258,16 +258,68 @@ for tier, question in test_questions:
 
 # COMMAND ----------
 
-# We log the Tier 1 (most capable) chain as the primary model.
-# The app selects the appropriate tier chain based on user context.
+# MLflow LangChain v1+ requires "models-from-code": the chain must be defined
+# in a standalone Python file and the file path passed to log_model.
 
-input_example = {
-    "messages": [
-        {"role": "user", "content": "What is Alinta's strategy for Loy Yang B?"}
-    ]
-}
+import os
+import tempfile
 
-print(f"\nLogging RAG chain to MLflow Unity Catalog model registry...")
+# Write the chain definition to a temp file
+CHAIN_CODE = f'''
+import mlflow
+from databricks_langchain import DatabricksVectorSearch, ChatDatabricks
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+
+CATALOG = "{CATALOG}"
+VS_ENDPOINT = "{VS_ENDPOINT}"
+VS_INDEX = "{VS_INDEX}"
+LLM_ENDPOINT = "{LLM_ENDPOINT}"
+
+def build_chain():
+    vectorstore = DatabricksVectorSearch(
+        endpoint=VS_ENDPOINT,
+        index_name=VS_INDEX,
+        columns=["chunk_id", "doc_id", "doc_title", "classification", "access_tier_level", "chunk_text", "section_title"],
+    )
+    retriever = vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={{"k": 6, "filter": {{"access_tier_level": {{"$gte": 1}}}}}},
+    )
+
+    prompt = ChatPromptTemplate.from_template(
+        "You are the Alinta Energy Executive Decision Studio AI.\\n\\n"
+        "Answer based on the context provided. Be concise and commercially direct.\\n\\n"
+        "Context:\\n{{context}}\\n\\n"
+        "Question: {{question}}"
+    )
+    llm = ChatDatabricks(endpoint=LLM_ENDPOINT, max_tokens=2048, temperature=0.1)
+
+    def format_docs(docs):
+        return "\\n\\n".join(
+            f"[{{d.metadata.get('doc_id', 'N/A')}}] {{d.metadata.get('doc_title', '')}}\\n{{d.page_content}}"
+            for d in docs
+        )
+
+    return (
+        {{"context": retriever | format_docs, "question": RunnablePassthrough()}}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+
+chain = build_chain()
+mlflow.models.set_model(chain)
+'''
+
+chain_file = tempfile.NamedTemporaryFile(mode="w", suffix="_rag_chain.py", delete=False)
+chain_file.write(CHAIN_CODE)
+chain_file.close()
+
+input_example = {"messages": [{"role": "user", "content": "What is Alinta's strategy for Loy Yang B?"}]}
+
+print(f"\nLogging RAG chain to MLflow Unity Catalog model registry (models-from-code)...")
 
 with mlflow.start_run(run_name="eds_rag_chain_v1") as run:
     mlflow.set_tags({
@@ -278,7 +330,6 @@ with mlflow.start_run(run_name="eds_rag_chain_v1") as run:
         "vector_search_index": VS_INDEX,
         "catalog": CATALOG,
     })
-
     mlflow.log_params({
         "chunk_size": 500,
         "chunk_overlap": 50,
@@ -286,8 +337,6 @@ with mlflow.start_run(run_name="eds_rag_chain_v1") as run:
         "llm_max_tokens": 2048,
         "llm_temperature": 0.1,
     })
-
-    # Log test results as metrics
     successful = sum(1 for r in test_results if r["success"])
     mlflow.log_metrics({
         "test_queries_total": len(test_results),
@@ -295,18 +344,17 @@ with mlflow.start_run(run_name="eds_rag_chain_v1") as run:
         "test_success_rate": successful / len(test_results) if test_results else 0,
     })
 
-    # Log the primary (Tier 1) chain
     model_info = mlflow.langchain.log_model(
-        lc_model=chains[1],
+        lc_model=chain_file.name,
         artifact_path="rag_chain",
         input_example=input_example,
         registered_model_name=MODEL_NAME,
     )
     print(f"[OK] Model logged. Run ID: {run.info.run_id}")
     print(f"[OK] Model URI: {model_info.model_uri}")
-
     run_id = run.info.run_id
 
+os.unlink(chain_file.name)
 print(f"\nMLflow run ID: {run_id}")
 
 # COMMAND ----------
