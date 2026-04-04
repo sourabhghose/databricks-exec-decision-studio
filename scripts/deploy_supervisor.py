@@ -27,6 +27,10 @@ ROOT = subprocess.run(
     capture_output=True, text=True
 ).stdout.strip() or "."
 
+CATALOG = "ausnet_process_intel_catalog"
+MODEL_NAME = f"{CATALOG}.eds_agents.rag_chain"
+ENDPOINT_NAME = "eds-supervisor"
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -53,21 +57,98 @@ def section(title: str):
 
 # ── Steps ──────────────────────────────────────────────────────────────────────
 
-def bundle_deploy(ignore_errors: bool = False, target: str = "dev"):
-    """Run databricks bundle deploy. Optionally ignore failures (e.g. model not registered yet)."""
-    cmd = ["databricks", "bundle", "deploy", "--target", target, "--profile", PROFILE]
+def bundle_deploy():
+    """Run databricks bundle deploy (dev target — jobs only, no serving endpoint)."""
+    cmd = ["databricks", "bundle", "deploy", "--target", "dev", "--profile", PROFILE]
     print(f"  $ {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     output = (result.stdout + result.stderr).strip()
     for line in output.splitlines():
         print(f"    {line}")
-
     if result.returncode != 0:
-        if ignore_errors and "does not exist" in output:
-            print("  ⚠  Endpoint skipped (model not registered yet — expected on first run)")
-            return False
         print(f"\n  ✗ bundle deploy failed")
         sys.exit(1)
+    return True
+
+
+def get_token() -> str:
+    result = subprocess.run(
+        ["databricks", "auth", "token", "--profile", PROFILE],
+        capture_output=True, text=True, check=True
+    )
+    import json as _json
+    return _json.loads(result.stdout)["access_token"]
+
+
+def api_get(token: str, path: str) -> dict:
+    import urllib.request
+    req = urllib.request.Request(
+        f"{WORKSPACE}{path}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        import json as _json
+        return _json.loads(resp.read())
+
+
+def api_post(token: str, path: str, body: dict) -> dict:
+    import urllib.request, json as _json
+    req = urllib.request.Request(
+        f"{WORKSPACE}{path}",
+        data=_json.dumps(body).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return _json.loads(resp.read())
+
+
+def api_put(token: str, path: str, body: dict) -> dict:
+    import urllib.request, json as _json
+    req = urllib.request.Request(
+        f"{WORKSPACE}{path}",
+        data=_json.dumps(body).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="PUT",
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return _json.loads(resp.read())
+
+
+def get_latest_model_version(token: str) -> str | None:
+    try:
+        resp = api_get(token, f"/api/2.1/unity-catalog/models/{MODEL_NAME}/versions?max_results=10")
+        versions = resp.get("model_versions", [])
+        if not versions:
+            return None
+        return str(max(int(v["version"]) for v in versions))
+    except Exception as e:
+        print(f"  ✗ Could not fetch model version: {e}")
+        return None
+
+
+def create_or_update_endpoint(token: str, model_version: str) -> bool:
+    section(f"Creating/updating serving endpoint: {ENDPOINT_NAME} (model v{model_version})")
+    served_entity = {
+        "name": ENDPOINT_NAME,
+        "entity_name": MODEL_NAME,
+        "entity_version": model_version,
+        "scale_to_zero_enabled": True,
+        "workload_size": "Small",
+    }
+    try:
+        api_get(token, f"/api/2.0/serving-endpoints/{ENDPOINT_NAME}")
+        # Exists — update
+        api_put(token, f"/api/2.0/serving-endpoints/{ENDPOINT_NAME}/config",
+                {"served_entities": [served_entity]})
+        print("  ✓ Endpoint updated")
+    except Exception:
+        # Create new
+        api_post(token, "/api/2.0/serving-endpoints", {
+            "name": ENDPOINT_NAME,
+            "config": {"served_entities": [served_entity]},
+        })
+        print("  ✓ Endpoint created (warming up ~5-10 min)")
     return True
 
 
@@ -143,25 +224,29 @@ def main():
     print("  EDS Supervisor Agent — Automated Deployment (via DABs)")
     print("=" * 60)
 
-    # Step 1: Initial bundle deploy (creates jobs; endpoint may fail if model missing)
-    section("Step 1/4 — bundle deploy (initial)")
-    if args.skip_jobs:
-        # Model already registered — deploy with-serving target to create/update endpoint
-        bundle_deploy(ignore_errors=False, target="with-serving")
-    else:
-        # First time — deploy dev target only (no endpoint, model not registered yet)
-        bundle_deploy(ignore_errors=False, target="dev")
+    print("\n▶  Fetching auth token...")
+    token = get_token()
+    print("  ✓ Authenticated")
+
+    # Step 1: Bundle deploy (creates/updates jobs)
+    section("Step 1/4 — bundle deploy (jobs)")
+    bundle_deploy()
 
     if not args.skip_jobs:
-        # Step 2: Run pipeline job (02 → 03), registers rag_chain model in UC
+        # Step 2: Run pipeline job (02 RAG → 03 Agents), registers rag_chain model in UC
         section("Step 2/4 — Run supervisor pipeline job (02 → 03)")
         run_pipeline_job()
-
-        # Step 3: Re-deploy with the with-serving target → creates endpoint now that model exists
-        section("Step 3/4 — bundle deploy --target with-serving (creates eds-supervisor endpoint)")
-        bundle_deploy(ignore_errors=False, target="with-serving")
     else:
-        print("\n  (skipping jobs and second bundle deploy)")
+        print("\n  (skipping pipeline job)")
+
+    # Step 3: Create/update serving endpoint via REST API (dynamic version)
+    section("Step 3/4 — Serving endpoint")
+    version = get_latest_model_version(token)
+    if not version:
+        print(f"  ✗ Model {MODEL_NAME} not found in registry. Run without --skip-jobs first.")
+        sys.exit(1)
+    print(f"  Found model version: {version}")
+    create_or_update_endpoint(token, version)
 
     # Step 4: Build and deploy the app
     if not args.skip_app:

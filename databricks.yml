@@ -14,26 +14,6 @@ targets:
     workspace:
       host: https://fevm-ausnet-process-intel.cloud.databricks.com
 
-  # Run after job 04 has completed and rag_chain model is registered.
-  # Usage: databricks bundle deploy --target with-serving
-  with-serving:
-    mode: development
-    workspace:
-      host: https://fevm-ausnet-process-intel.cloud.databricks.com
-    resources:
-      model_serving_endpoints:
-        eds_supervisor_endpoint:
-          name: eds-supervisor
-          config:
-            served_entities:
-              - entity_name: ${var.catalog}.eds_agents.rag_chain
-                scale_to_zero_enabled: true
-                workload_size: Small
-          tags:
-            - key: project
-              value: exec-decision-studio
-            - key: managed_by
-              value: databricks-asset-bundle
 
 resources:
   jobs:
