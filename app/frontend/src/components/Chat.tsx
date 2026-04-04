@@ -7,7 +7,6 @@ import {
   Clock,
   Cpu,
   Gauge,
-  ThumbsUp,
   FileDown,
   Presentation,
 } from "lucide-react";
@@ -40,7 +39,7 @@ interface Message {
   sources?: string[];
   latency_ms?: number;
   chartData?: ChartData;
-  liked?: boolean;
+
 }
 
 const ROLE = "Board Director / CEO";
@@ -461,11 +460,6 @@ export default function Chat() {
     }
   };
 
-  const likeMessage = (index: number) => {
-    setMessages((prev) =>
-      prev.map((m, i) => (i === index ? { ...m, liked: !m.liked } : m))
-    );
-  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -655,40 +649,25 @@ export default function Chat() {
                     </div>
                   )}
 
-                {/* Like + Download actions */}
+                {/* Download actions */}
                 {msg.role === "assistant" && msg.content && (
                   <div className="flex items-center gap-2 mt-2 pt-2 border-t border-dark-border/30">
                     <button
-                      onClick={() => likeMessage(i)}
-                      title={msg.liked ? "Unlike" : "Like this response"}
-                      className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border transition-all cursor-pointer
-                        ${msg.liked
-                          ? "bg-gold/15 border-gold/40 text-gold"
-                          : "border-dark-border/50 text-slate-500 hover:text-gold hover:border-gold/30"}`}
+                      onClick={() => downloadAsPDF(msg)}
+                      className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-dark-border/50 text-slate-500 hover:text-blue-400 hover:border-blue-400/40 transition-all cursor-pointer"
+                      title="Download as PDF (print dialog)"
                     >
-                      <ThumbsUp size={11} />
-                      {msg.liked ? "Liked" : "Like"}
+                      <FileDown size={11} />
+                      PDF
                     </button>
-                    {msg.liked && (
-                      <>
-                        <button
-                          onClick={() => downloadAsPDF(msg)}
-                          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-dark-border/50 text-slate-400 hover:text-blue-400 hover:border-blue-400/40 transition-all cursor-pointer"
-                          title="Download as PDF (print dialog)"
-                        >
-                          <FileDown size={11} />
-                          PDF
-                        </button>
-                        <button
-                          onClick={() => downloadAsPPTX(msg)}
-                          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-dark-border/50 text-slate-400 hover:text-orange-400 hover:border-orange-400/40 transition-all cursor-pointer"
-                          title="Download as PowerPoint"
-                        >
-                          <Presentation size={11} />
-                          PPTX
-                        </button>
-                      </>
-                    )}
+                    <button
+                      onClick={() => downloadAsPPTX(msg)}
+                      className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-dark-border/50 text-slate-500 hover:text-orange-400 hover:border-orange-400/40 transition-all cursor-pointer"
+                      title="Download as PowerPoint"
+                    >
+                      <Presentation size={11} />
+                      PPTX
+                    </button>
                   </div>
                 )}
               </div>
