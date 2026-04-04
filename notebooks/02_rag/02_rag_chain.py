@@ -317,7 +317,11 @@ chain_file = tempfile.NamedTemporaryFile(mode="w", suffix="_rag_chain.py", delet
 chain_file.write(CHAIN_CODE)
 chain_file.close()
 
+from mlflow.models.signature import infer_signature
+
 input_example = {"messages": [{"role": "user", "content": "What is Alinta's strategy for Loy Yang B?"}]}
+sample_output = "Alinta Energy's strategy for Loy Yang B focuses on optimising asset performance while evaluating long-term transition options."
+signature = infer_signature(input_example, sample_output)
 
 print(f"\nLogging RAG chain to MLflow Unity Catalog model registry (models-from-code)...")
 
@@ -348,6 +352,7 @@ with mlflow.start_run(run_name="eds_rag_chain_v1") as run:
         lc_model=chain_file.name,
         artifact_path="rag_chain",
         input_example=input_example,
+        signature=signature,
         registered_model_name=MODEL_NAME,
     )
     print(f"[OK] Model logged. Run ID: {run.info.run_id}")
