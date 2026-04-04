@@ -53,9 +53,9 @@ def section(title: str):
 
 # ── Steps ──────────────────────────────────────────────────────────────────────
 
-def bundle_deploy(ignore_errors: bool = False):
+def bundle_deploy(ignore_errors: bool = False, target: str = "dev"):
     """Run databricks bundle deploy. Optionally ignore failures (e.g. model not registered yet)."""
-    cmd = ["databricks", "bundle", "deploy", "--profile", PROFILE]
+    cmd = ["databricks", "bundle", "deploy", "--target", target, "--profile", PROFILE]
     print(f"  $ {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     output = (result.stdout + result.stderr).strip()
@@ -146,20 +146,20 @@ def main():
     # Step 1: Initial bundle deploy (creates jobs; endpoint may fail if model missing)
     section("Step 1/4 — bundle deploy (initial)")
     if args.skip_jobs:
-        # Model already registered — full deploy should succeed including endpoint
-        bundle_deploy(ignore_errors=False)
+        # Model already registered — deploy with-serving target to create/update endpoint
+        bundle_deploy(ignore_errors=False, target="with-serving")
     else:
-        # First time — model not registered yet, endpoint deploy will fail; that's OK
-        bundle_deploy(ignore_errors=True)
+        # First time — deploy dev target only (no endpoint, model not registered yet)
+        bundle_deploy(ignore_errors=False, target="dev")
 
     if not args.skip_jobs:
         # Step 2: Run pipeline job (02 → 03), registers rag_chain model in UC
         section("Step 2/4 — Run supervisor pipeline job (02 → 03)")
         run_pipeline_job()
 
-        # Step 3: Re-deploy bundle now that model exists → creates endpoint
-        section("Step 3/4 — bundle deploy (creates eds-supervisor endpoint)")
-        bundle_deploy(ignore_errors=False)
+        # Step 3: Re-deploy with the with-serving target → creates endpoint now that model exists
+        section("Step 3/4 — bundle deploy --target with-serving (creates eds-supervisor endpoint)")
+        bundle_deploy(ignore_errors=False, target="with-serving")
     else:
         print("\n  (skipping jobs and second bundle deploy)")
 
