@@ -58,6 +58,8 @@ interface DrilldownData {
   metric: string;
   items: any[];
   analysis: string;
+  kpi_name?: string;
+  filter?: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -85,17 +87,19 @@ const METRIC_LABELS: Record<string, string> = {
   risks: "Open Risk Register",
   actions: "Action Items",
   queries: "AI Query Activity",
+  kpi_detail: "KPI Deep Dive",
 };
 
-function KPICard({ kpi }: { kpi: KPI }) {
+function KPICard({ kpi, onClick }: { kpi: KPI; onClick?: () => void }) {
   const up = kpi.pct_vs_target >= 0;
   const Icon = up ? TrendingUp : TrendingDown;
   const borderColor = STATUS_COLORS[kpi.status] || "#64748b";
 
   return (
     <div
-      className="glass-card p-4 flex flex-col gap-2 border-l-4"
+      className="glass-card p-4 flex flex-col gap-2 border-l-4 cursor-pointer group transition-all hover:shadow-lg"
       style={{ borderLeftColor: borderColor }}
+      onClick={onClick}
     >
       <div className="flex items-start justify-between gap-2">
         <div>
@@ -134,6 +138,11 @@ function KPICard({ kpi }: { kpi: KPI }) {
         </div>
         <span className="text-[10px] text-slate-500">
           Target: {kpi.target?.toLocaleString()} {kpi.unit}
+        </span>
+      </div>
+      <div className="flex justify-end mt-0.5">
+        <span className="text-[10px] text-slate-600 group-hover:text-slate-400 flex items-center gap-0.5 transition-colors">
+          AI Analysis <ChevronRight size={10} />
         </span>
       </div>
     </div>
@@ -276,6 +285,40 @@ function QueryItems({ items }: { items: any[] }) {
   );
 }
 
+/** KPI time-series history table for kpi_detail drill-down. */
+function KpiDetailItems({ items }: { items: any[] }) {
+  const unit = items[0]?.unit || "";
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid #1e293b" }}>
+            {["Period", "Value", "Target", "Δ%", "Anomaly"].map((h) => (
+              <th key={h} style={{ padding: "6px 8px", color: "#64748b", fontWeight: 500, textAlign: h === "Period" ? "left" : "center" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {[...items].reverse().map((row, i) => {
+            const pct = Number(row.pct ?? 0);
+            const c = Math.abs(pct) < 5 ? "#22c55e" : pct < -10 ? "#ef4444" : "#eab308";
+            const isAnom = String(row.is_anomaly || "").toLowerCase() === "true";
+            return (
+              <tr key={i} style={{ borderBottom: "1px solid #0f172a", background: i % 2 === 0 ? "rgba(255,255,255,0.02)" : "transparent" }}>
+                <td style={{ padding: "5px 8px", color: "#e2e8f0" }}>{row.period}</td>
+                <td style={{ padding: "5px 8px", color: "#fff", textAlign: "center", fontWeight: 600 }}>{Number(row.value).toLocaleString()} <span style={{ color: "#64748b", fontWeight: 400 }}>{unit}</span></td>
+                <td style={{ padding: "5px 8px", color: "#94a3b8", textAlign: "center" }}>{Number(row.target).toLocaleString()} {unit}</td>
+                <td style={{ padding: "5px 8px", textAlign: "center", color: c, fontWeight: 700 }}>{pct >= 0 ? "+" : ""}{pct.toFixed(1)}%</td>
+                <td style={{ padding: "5px 8px", textAlign: "center" }}>{isAnom ? <span style={{ fontSize: 9, background: "rgba(239,68,68,0.2)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)", padding: "2px 5px", borderRadius: 4 }}>ANOMALY</span> : <span style={{ color: "#334155" }}>—</span>}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Right-side drawer — rendered via portal at document.body to escape stacking contexts. */
 function DrilldownDrawer({
   metric,
@@ -288,10 +331,17 @@ function DrilldownDrawer({
   loading: boolean;
   onClose: () => void;
 }) {
-  const title = METRIC_LABELS[metric] || metric;
+  const title = metric === "kpi_detail" && data?.kpi_name
+    ? data.kpi_name
+    : (METRIC_LABELS[metric] || metric);
 
   const count = data?.items?.length ?? 0;
-  const countLabel = metric === "kpis" ? "KPIs" : metric === "risks" ? "Risks" : metric === "actions" ? "Actions" : "Queries";
+  const countLabel =
+    metric === "kpis" ? "KPIs"
+    : metric === "risks" ? "Risks"
+    : metric === "actions" ? "Actions"
+    : metric === "kpi_detail" ? "Periods"
+    : "Queries";
 
   return createPortal(
     <>
@@ -348,10 +398,11 @@ function DrilldownDrawer({
               <p style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>
                 {count} {countLabel}
               </p>
-              {metric === "kpis"    && <KpiItems    items={data!.items} />}
-              {metric === "risks"   && <RiskItems   items={data!.items} />}
-              {metric === "actions" && <ActionItems  items={data!.items} />}
-              {metric === "queries" && <QueryItems   items={data!.items} />}
+              {metric === "kpis"       && <KpiItems       items={data!.items} />}
+              {metric === "risks"      && <RiskItems      items={data!.items} />}
+              {metric === "actions"    && <ActionItems    items={data!.items} />}
+              {metric === "queries"    && <QueryItems     items={data!.items} />}
+              {metric === "kpi_detail" && <KpiDetailItems items={data!.items} />}
             </div>
           )}
 
@@ -394,12 +445,15 @@ export default function Overview() {
     fetchData();
   }
 
-  async function openDrilldown(metric: string) {
+  async function openDrilldown(metric: string, filterKey = "", filterVal = "") {
     setDrilldown(metric);
     setDrilldownLoading(true);
     setDrilldownData(null);
     try {
-      const r = await fetch(`/api/overview/drilldown?metric=${metric}`);
+      const params = new URLSearchParams({ metric });
+      if (filterKey) params.set("filter_key", filterKey);
+      if (filterVal) params.set("filter_val", filterVal);
+      const r = await fetch(`/api/overview/drilldown?${params}`);
       if (r.ok) setDrilldownData(await r.json());
     } catch (e) {
       console.error("Drilldown fetch failed", e);
@@ -442,6 +496,7 @@ export default function Overview() {
 
   const actionChartData = Object.entries(data.action_summary).map(([status, cnt]) => ({
     status: status.replace("_", " "),
+    statusKey: status,
     count: cnt,
     fill: ACTION_COLORS[status] || "#64748b",
   }));
@@ -583,7 +638,7 @@ export default function Overview() {
         </h3>
         <div className="grid grid-cols-3 gap-3">
           {data.kpis.slice(0, 6).map((kpi) => (
-            <KPICard key={kpi.kpi_name} kpi={kpi} />
+            <KPICard key={kpi.kpi_name} kpi={kpi} onClick={() => openDrilldown("kpi_detail", "", kpi.kpi_name)} />
           ))}
         </div>
       </div>
@@ -602,7 +657,7 @@ export default function Overview() {
               <XAxis dataKey="rating" tick={{ fill: chartColors.tick, fontSize: 11 }} />
               <YAxis tick={{ fill: chartColors.tick, fontSize: 11 }} />
               <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+              <Bar dataKey="count" radius={[4, 4, 0, 0]} onClick={(d: any) => openDrilldown("risks", "rating", d.rating)} style={{ cursor: "pointer" }}>
                 {riskChartData.map((entry, i) => (
                   <Cell key={i} fill={entry.fill} />
                 ))}
@@ -627,6 +682,8 @@ export default function Overview() {
                 outerRadius={72}
                 paddingAngle={3}
                 dataKey="value"
+                onClick={(d: any) => openDrilldown("kpis", "status", d.name)}
+                style={{ cursor: "pointer" }}
               >
                 {kpiPieData.map((entry, i) => (
                   <Cell key={i} fill={entry.fill} />
@@ -652,7 +709,7 @@ export default function Overview() {
               <XAxis type="number" tick={{ fill: chartColors.tick, fontSize: 11 }} />
               <YAxis dataKey="status" type="category" tick={{ fill: chartColors.tick, fontSize: 10 }} width={72} />
               <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+              <Bar dataKey="count" radius={[0, 4, 4, 0]} onClick={(d: any) => openDrilldown("actions", "status", d.statusKey)} style={{ cursor: "pointer" }}>
                 {actionChartData.map((entry, i) => (
                   <Cell key={i} fill={entry.fill} />
                 ))}

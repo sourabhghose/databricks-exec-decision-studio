@@ -237,22 +237,27 @@ async def get_overview():
 
 
 @router.get("/api/overview/drilldown")
-async def get_drilldown(metric: str = Query(..., description="One of: kpis, risks, actions, queries")):
-    """Return full item list + AI analysis for a given metric."""
-
+async def get_drilldown(
+    metric: str = Query(...),
+    filter_key: str = Query(default=""),
+    filter_val: str = Query(default=""),
+):
+    """Return full item list + AI analysis. Optional filter_key/filter_val for sub-filtering."""
     if metric == "kpis":
-        return await _drilldown_kpis()
+        return await _drilldown_kpis(filter_key=filter_key, filter_val=filter_val)
     elif metric == "risks":
-        return await _drilldown_risks()
+        return await _drilldown_risks(filter_key=filter_key, filter_val=filter_val)
     elif metric == "actions":
-        return await _drilldown_actions()
+        return await _drilldown_actions(filter_key=filter_key, filter_val=filter_val)
     elif metric == "queries":
         return await _drilldown_queries()
+    elif metric == "kpi_detail":
+        return await _drilldown_kpi_detail(filter_val)
     else:
         return {"metric": metric, "items": [], "analysis": "Unknown metric requested."}
 
 
-async def _drilldown_kpis() -> dict:
+async def _drilldown_kpis(filter_key: str = "", filter_val: str = "") -> dict:
     rows = _run_sql(f"""
         SELECT kpi_name, business_unit, category,
                ROUND(CAST(value AS DOUBLE), 2) as value, unit,
@@ -299,16 +304,24 @@ async def _drilldown_kpis() -> dict:
         "Maximum 250 words.\n\nKPI DATA:\n" + "\n".join(summary_lines)
     )
 
+    # Apply status filter if requested
+    if filter_key == "status" and filter_val:
+        items = [i for i in items if i["status"] == filter_val]
+
     analysis = _get_ai_analysis(prompt) or _DEMO_ANALYSIS["kpis"]
-    return {"metric": "kpis", "items": items, "analysis": analysis}
+    return {"metric": "kpis", "items": items, "analysis": analysis, "filter": filter_val}
 
 
-async def _drilldown_risks() -> dict:
+async def _drilldown_risks(filter_key: str = "", filter_val: str = "") -> dict:
+    rating_clause = ""
+    if filter_key == "rating" and filter_val:
+        safe_rv = filter_val.replace("'", "''")
+        rating_clause = f" AND rating = '{safe_rv}'"
     rows = _run_sql(f"""
         SELECT risk_id, category, description, likelihood, consequence,
                rating, risk_score, owner, status
         FROM {CATALOG}.eds_synthetic.risk_register
-        WHERE status != 'closed'
+        WHERE status != 'closed'{rating_clause}
         ORDER BY risk_score DESC
     """)
 
@@ -335,11 +348,16 @@ async def _drilldown_risks() -> dict:
     return {"metric": "risks", "items": items, "analysis": analysis}
 
 
-async def _drilldown_actions() -> dict:
+async def _drilldown_actions(filter_key: str = "", filter_val: str = "") -> dict:
+    status_clause = ""
+    if filter_key == "status" and filter_val:
+        safe_sv = filter_val.replace("'", "''")
+        status_clause = f" AND status = '{safe_sv}'"
     rows = _run_sql(f"""
         SELECT action_id, title, description, status, owner, due_date,
                priority, related_decision_id
         FROM {CATALOG}.eds_actions.action_items
+        WHERE 1=1{status_clause}
         ORDER BY CASE status
             WHEN 'overdue' THEN 1
             WHEN 'open' THEN 2
@@ -403,3 +421,56 @@ async def _drilldown_queries() -> dict:
 
     analysis = _get_ai_analysis(prompt) or _DEMO_ANALYSIS["queries"]
     return {"metric": "queries", "items": items, "analysis": analysis}
+
+
+async def _drilldown_kpi_detail(kpi_name: str) -> dict:
+    """Full time-series history + AI analysis for a single KPI."""
+    if not kpi_name:
+        return {"metric": "kpi_detail", "items": [], "analysis": "No KPI specified.", "kpi_name": ""}
+
+    safe = kpi_name.replace("'", "''")
+    rows = _run_sql(f"""
+        SELECT period,
+               ROUND(CAST(value AS DOUBLE), 2) as value,
+               ROUND(CAST(target AS DOUBLE), 2) as target,
+               business_unit, unit, category, is_anomaly,
+               ROUND((CAST(value AS DOUBLE) - CAST(target AS DOUBLE))
+                 / NULLIF(ABS(CAST(target AS DOUBLE)), 0) * 100, 1) as pct
+        FROM {CATALOG}.eds_synthetic.kpi_timeseries
+        WHERE kpi_name = '{safe}'
+        ORDER BY period
+    """)
+
+    items = [dict(r) for r in rows] if rows else []
+
+    if items:
+        latest = items[-1]
+        value = float(latest.get("value", 0))
+        target = float(latest.get("target", 0))
+        pct = float(latest.get("pct", 0))
+        unit = latest.get("unit", "")
+        bu = latest.get("business_unit", "")
+        trend = ", ".join([f"{r['period']}: {r['value']}" for r in items[-8:]])
+
+        prompt = (
+            f"You are Alinta Energy board advisor. Provide a detailed analysis of this KPI:\n"
+            f"KPI: {kpi_name} | Business Unit: {bu}\n"
+            f"Current: {value} {unit} vs Target: {target} {unit} | Δ {pct:+.1f}%\n"
+            f"Historical trend (recent periods): {trend}\n\n"
+            "Provide: ROOT CAUSE ANALYSIS, TREND INTERPRETATION, RECOMMENDED ACTIONS, BOARD IMPLICATIONS.\n"
+            "Be executive-grade, max 200 words, use bullet points."
+        )
+        analysis = _get_ai_analysis(prompt)
+        if not analysis:
+            direction = "outperforming" if pct > 0 else "underperforming"
+            analysis = (
+                f"## {kpi_name}\n\n"
+                f"- Currently {direction} target by {abs(pct):.1f}%\n"
+                f"- {len(items)} periods of historical data available\n"
+                f"- Business Unit: {bu}\n"
+                "- Recommend weekly monitoring and root cause review with business unit owner"
+            )
+    else:
+        analysis = f"No historical data found for KPI: {kpi_name}"
+
+    return {"metric": "kpi_detail", "items": items, "analysis": analysis, "kpi_name": kpi_name}

@@ -1,5 +1,5 @@
 # Executive Decision Studio — Project Status
-**Last updated:** 2026-04-04 (session 3)
+**Last updated:** 2026-04-05 (session 4)
 
 ---
 
@@ -91,13 +91,13 @@ Each file: `{doc_id}.txt` with YAML frontmatter + full document text.
 | About | `About.tsx` | — |
 
 ### Key frontend features
-- **Executive Overview** — KPI hero cards (6), risk distribution bar/pie charts, action item bar chart, top 5 risks, recent 4 decisions, system intelligence summary footer
+- **Executive Overview drill-down** — every metric is clickable: 4 hero stat cards (KPIs / Risks / Actions / AI Queries), 6 KPI performance cards, Risk Distribution bar chart, KPI Health Status pie chart, Action Items bar chart; each opens a right-side drawer via `ReactDOM.createPortal` with an AI analysis panel (`ai_query('databricks-claude-sonnet-4-6', ...)`) + full item list; `GET /api/overview/drilldown?metric=&filter_key=&filter_val=` backend
 - **Inline chat charts** — Recharts `BarChart`/`LineChart` rendered inside assistant messages via SSE `{"type":"chart"}` event
 - **AI Briefing** — SSE streaming with 4 briefing types (Weekly, Board, Investor, Crisis), markdown rendering, `.md` export
 - **Document Library** — 22-doc grid with classification badges, tier labels, format icons, 4-dimension filter panel, click-to-expand modal
 - **Market Intelligence** — 3-panel tab: competitor/regulatory news (GDELT, live), ASX peer stocks with sparklines (Yahoo Finance, live), ACCU/LGC carbon prices with trend charts + strategic implications (CER quarterly)
 - **Markdown table rendering** — LLM `|pipe|tables|` parsed into proper `<table>` HTML with `thead`/`tbody`, striped rows, Alinta-themed headers
-- **Like → Export** — ThumbsUp button on each assistant message; when liked, reveals PDF (browser print) and PPTX (python-pptx via `/api/export/pptx`) download buttons
+- **PDF / PPTX export** — always-visible download buttons on every assistant message (browser print PDF, python-pptx PPTX via `/api/export/pptx`)
 - **Document Upload** — "Upload Document" button in Document Library header; uploads file to `UC Volume /tier4/`, triggers ingestion job 950647315295103; shows progress/success/error toast
 - **32 C-level sample questions** — 6 color-coded categories replace role dropdown in Strategic Chat sidebar
 - Alinta Energy brand: orange `#F47920`, **dark mode default**, light/dark toggle
@@ -110,6 +110,7 @@ Each file: `{doc_id}.txt` with YAML frontmatter + full document text.
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/api/overview` | GET | Aggregated executive overview (KPIs, risks, decisions, actions, audit, docs) |
+| `/api/overview/drilldown` | GET | Drill-down detail + AI analysis for any metric; params: `metric`, `filter_key`, `filter_val` |
 | `/api/chat` | POST | Synchronous RAG chat |
 | `/api/chat/stream` | POST | SSE streaming RAG chat with inline chart events |
 | `/api/kpi` | GET | KPI time series |
@@ -187,23 +188,25 @@ databricks jobs run-now 307588500376638 --profile=fe-vm-ausnet-process-intel  # 
 
 ### Deploy app update (CORRECT workflow)
 ```bash
-# 1. Build frontend
-cd "/Users/sourabh.ghose/Cursor-Projects/Databricks Executive Decision Studio/app/frontend"
-npm run build
-
-# 2. Stage clean files (no node_modules) and upload to workspace
-STAGE=$(mktemp -d)
 APP_DIR="/Users/sourabh.ghose/Cursor-Projects/Databricks Executive Decision Studio/app"
-cp "$APP_DIR/app.py" "$APP_DIR/app.yaml" "$APP_DIR/requirements.txt" "$STAGE/"
-cp -r "$APP_DIR/server" "$STAGE/"
-mkdir -p "$STAGE/frontend" && cp -r "$APP_DIR/frontend/dist" "$STAGE/frontend/"
-databricks workspace import-dir "$STAGE" /Workspace/Users/sourabh.ghose@databricks.com/eds-app \
-  --profile=fe-vm-ausnet-process-intel --overwrite
+WS_PATH="/Workspace/Users/sourabh.ghose@databricks.com/executive-decision-studio"
+PROFILE="fe-vm-ausnet-process-intel"
 
-# 3. Redeploy
+# 1. Build frontend
+cd "$APP_DIR/frontend" && npm run build
+
+# 2. Sync all backend files (excludes node_modules, .venv, frontend/src, etc.)
+cd "$APP_DIR" && databricks sync . "$WS_PATH" --profile "$PROFILE" \
+  --exclude "frontend/src" --exclude "frontend/node_modules" \
+  --exclude "frontend/public" --exclude "__pycache__" --exclude ".venv" --full
+
+# 3. Upload built frontend (import-dir overwrites individual files)
+databricks workspace import-dir "$APP_DIR/frontend/dist" "$WS_PATH/frontend/dist" \
+  --overwrite --profile "$PROFILE"
+
+# 4. Redeploy
 databricks apps deploy exec-decision-studio \
-  --source-code-path /Workspace/Users/sourabh.ghose@databricks.com/eds-app \
-  --profile=fe-vm-ausnet-process-intel
+  --source-code-path "$WS_PATH" --profile "$PROFILE"
 ```
 
-> NOTE: `databricks bundle deploy` only updates jobs/notebooks — NOT the app. Always use the 3-step workflow above.
+> NOTE: `databricks bundle deploy` only updates jobs/notebooks — NOT the app. Always use the 4-step workflow above.
