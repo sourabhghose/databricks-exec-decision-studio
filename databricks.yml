@@ -136,3 +136,29 @@ resources:
               - databricks-langchain
               - databricks-vectorsearch
               - mlflow
+
+    eds_supervisor_pipeline_job:
+      name: "[EDS] 04 - Deploy Supervisor Pipeline"
+      tasks:
+        - task_key: rag_chain_setup
+          run_job_task:
+            job_id: ${resources.jobs.eds_rag_job.id}
+        - task_key: deploy_agents
+          depends_on:
+            - task_key: rag_chain_setup
+          run_job_task:
+            job_id: ${resources.jobs.eds_agents_job.id}
+
+  model_serving_endpoints:
+    eds_supervisor_endpoint:
+      name: eds-supervisor
+      config:
+        served_entities:
+          - entity_name: ${var.catalog}.eds_agents.rag_chain
+            scale_to_zero_enabled: true
+            workload_size: Small
+      tags:
+        - key: project
+          value: exec-decision-studio
+        - key: managed_by
+          value: databricks-asset-bundle

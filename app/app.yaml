@@ -17,3 +17,5 @@ resources:
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: warehouse
+  - name: SUPERVISOR_ENDPOINT
+    value: eds-supervisor
