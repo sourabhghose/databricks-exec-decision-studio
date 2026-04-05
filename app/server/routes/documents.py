@@ -43,8 +43,8 @@ def _run_sql(sql: str) -> list:
         r = requests.post(
             f"{url}/api/2.0/sql/statements",
             headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-            json={"warehouse_id": wh, "statement": sql, "wait_timeout": "30s"},
-            timeout=35,
+            json={"warehouse_id": wh, "statement": sql, "wait_timeout": "50s"},
+            timeout=60,
         )
         if not r.ok:
             return []

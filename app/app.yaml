@@ -13,6 +13,10 @@ resources:
     sql_warehouse:
       id: 33baaa9523773520
       permission: CAN_USE
+  - name: llm_endpoint
+    serving_endpoint:
+      name: databricks-claude-sonnet-4-6
+      permission: CAN_QUERY
 
 env:
   - name: DATABRICKS_WAREHOUSE_ID
