@@ -360,7 +360,7 @@ print(f"\nAll tables and volumes created successfully under catalog: {CATALOG}")
 import requests
 
 APP_NAME = "exec-decision-studio"
-SCHEMAS = ["eds_synthetic", "eds_processed", "eds_actions", "eds_audit", "eds_evaluation"]
+SCHEMAS = ["eds_raw", "eds_synthetic", "eds_processed", "eds_actions", "eds_audit", "eds_evaluation", "eds_vectors"]
 TABLES = [
     f"{CATALOG}.eds_synthetic.kpi_timeseries",
     f"{CATALOG}.eds_synthetic.risk_register",
