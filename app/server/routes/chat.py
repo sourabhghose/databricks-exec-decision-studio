@@ -565,6 +565,22 @@ def _get_kpi_context() -> str:
     ])
 
 
+def _get_risk_context() -> str:
+    rows = _run_sql(f"""
+        SELECT risk_id, category, description, risk_score, rating, owner, mitigation, status
+        FROM {CATALOG}.eds_synthetic.risks
+        WHERE status != 'accepted'
+        ORDER BY risk_score DESC LIMIT 10
+    """)
+    if not rows:
+        return DEMO_RISK_CONTEXT
+    return "Enterprise Risk Register (top open risks):\n" + "\n".join([
+        f"  {r['risk_id']} [{r['rating']}, Score {r['risk_score']}] {r['category'].title()}: "
+        f"{r['description']} — Owner: {r['owner']} | Mitigation: {r['mitigation']}"
+        for r in rows
+    ])
+
+
 def _log_audit(
     query: str, answer: str, intent: str, tier: int,
     source_ids: list, confidence: float, elapsed: int,
@@ -689,6 +705,26 @@ async def chat_stream(req: ChatRequest):
         intent = _classify_intent(req.message)
         docs = _retrieve_docs(req.message, tier=tier)
 
+    # Access control: enforce tier restrictions per supervisor policy
+    TIER_RESTRICTED = {"strategic_gap": 2, "competitive": 2, "evaluation": 3}
+    required_tier = TIER_RESTRICTED.get(intent)
+    if required_tier and tier > required_tier:
+        access_msg = (
+            f"Access restricted: the **{intent.replace('_', ' ').title()} Agent** requires "
+            f"Tier {required_tier} (Executive Leadership Team) access or above. "
+            f"Your current role is Tier {tier}. Please contact your system administrator "
+            f"if you believe this is incorrect."
+        )
+
+        async def _denied():
+            yield f"data: {json.dumps({'type': 'meta', 'agent': 'supervisor', 'sources': []})}\n\n"
+            for word in access_msg.split(" "):
+                yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'latency_ms': 0, 'confidence': 0.0})}\n\n"
+
+        return StreamingResponse(_denied(), media_type="text/event-stream",
+                                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
     source_ids: list[str] = []
     context_parts: list[str] = []
     for d in docs:
@@ -709,8 +745,11 @@ async def chat_stream(req: ChatRequest):
         else:
             context = DEMO_DOC_CONTEXT
 
+    # Inject agent-specific live data on top of document context
     if intent == "kpi_monitor":
         context = "KPI Data (latest period):\n" + _get_kpi_context() + "\n\n" + context
+    elif intent == "strategic_gap":
+        context = _get_risk_context() + "\n\n" + context
     elif intent in ("competitive", "briefing"):
         context = _get_market_context() + "\n\n" + context
 

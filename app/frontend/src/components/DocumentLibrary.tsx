@@ -194,6 +194,8 @@ export default function DocumentLibrary() {
           // Refresh document list and notify Overview to update its tiles
           fetchDocuments();
           window.dispatchEvent(new CustomEvent("eds:docs-updated"));
+          // Trigger VS index sync so new document is immediately searchable
+          fetch("/api/vector-search/sync", { method: "POST" }).catch(() => {});
           setTimeout(() => setUploadStatus("idle"), 10000);
         } else if (d.state === "error") {
           setUploadStatus("error");

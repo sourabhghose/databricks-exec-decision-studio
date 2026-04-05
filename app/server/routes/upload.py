@@ -3,8 +3,8 @@ POST /api/documents/upload — Upload a document to the UC Volume and trigger in
 """
 
 import os
-import uuid
-from datetime import datetime
+import re
+from datetime import date
 
 import requests
 from fastapi import APIRouter, UploadFile, File, Form
@@ -58,6 +58,53 @@ def _trigger_ingestion(token: str, workspace_url: str) -> tuple[str | None, str]
         return None, str(e)[:200]
 
 
+def _register_document(token: str, workspace_url: str, filename: str, tier: int, classification: str) -> None:
+    """MERGE a row into eds_synthetic.documents so the document count tile updates immediately."""
+    wh = get_warehouse_id()
+    if not wh:
+        print("[upload] No warehouse ID — skipping document registration")
+        return
+
+    stem = re.sub(r"\.[^.]+$", "", filename)
+    doc_id = re.sub(r"[^a-zA-Z0-9\-_]", "_", stem)[:100]
+    title = stem.replace("_", " ").replace("-", " ").title()
+    today = date.today().isoformat()
+
+    # Escape single quotes to prevent SQL issues with user-supplied filenames
+    safe_doc_id = doc_id.replace("'", "''")
+    safe_title = title.replace("'", "''")
+    safe_classification = classification.replace("'", "''")
+
+    sql = f"""
+        MERGE INTO {CATALOG}.eds_synthetic.documents AS target
+        USING (SELECT '{safe_doc_id}' AS doc_id) AS source
+        ON target.doc_id = source.doc_id
+        WHEN NOT MATCHED THEN INSERT (
+            doc_id, title, doc_type, classification, access_tier_level,
+            business_area, effective_date, author, version, content,
+            is_synthetic, source_system, created_at
+        ) VALUES (
+            '{safe_doc_id}', '{safe_title}', 'internal_report', '{safe_classification}', {int(tier)},
+            'Corporate', '{today}', 'Manual Upload', 'v1.0', '',
+            false, 'Manual', current_timestamp()
+        )
+    """
+    try:
+        r = requests.post(
+            f"{workspace_url}/api/2.0/sql/statements",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"warehouse_id": wh, "statement": sql.strip(), "wait_timeout": "30s"},
+            timeout=40,
+        )
+        state = r.json().get("status", {}).get("state") if r.ok else None
+        if state == "SUCCEEDED":
+            print(f"[upload] Registered '{safe_doc_id}' in eds_synthetic.documents")
+        else:
+            print(f"[upload] Registration SQL HTTP {r.status_code}: {r.text[:300]}")
+    except Exception as e:
+        print(f"[upload] Registration error: {e}")
+
+
 @router.post("/api/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
@@ -96,6 +143,9 @@ async def upload_document(
             status_code=502,
             content={"error": f"Failed to upload to Unity Catalog Volume. {upload_err}"},
         )
+
+    # Register in eds_synthetic.documents so document count tiles update immediately
+    _register_document(tok, url, safe_name, tier, classification)
 
     # Trigger ingestion job (async — doesn't block response)
     run_id, trigger_err = _trigger_ingestion(tok, url)
