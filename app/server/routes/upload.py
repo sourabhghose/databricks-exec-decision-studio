@@ -38,8 +38,8 @@ def _files_api_upload(token: str, workspace_url: str, volume_path: str, content:
         return False, str(e)[:200]
 
 
-def _trigger_ingestion(token: str, workspace_url: str) -> str | None:
-    """Fire-and-forget: trigger the ingestion job. Returns run_id or None."""
+def _trigger_ingestion(token: str, workspace_url: str) -> tuple[str | None, str]:
+    """Trigger the ingestion job. Returns (run_id, error_detail)."""
     try:
         r = requests.post(
             f"{workspace_url}/api/2.1/jobs/run-now",
@@ -47,13 +47,15 @@ def _trigger_ingestion(token: str, workspace_url: str) -> str | None:
             json={"job_id": INGESTION_JOB_ID},
             timeout=15,
         )
+        print(f"[upload] Job trigger HTTP {r.status_code}: {r.text[:300]}")
         if r.ok:
             run_id = r.json().get("run_id")
             print(f"[upload] Triggered ingestion job, run_id={run_id}")
-            return str(run_id)
+            return str(run_id), ""
+        return None, f"HTTP {r.status_code}: {r.text[:200]}"
     except Exception as e:
         print(f"[upload] Job trigger error: {e}")
-    return None
+        return None, str(e)[:200]
 
 
 @router.post("/api/documents/upload")
@@ -96,7 +98,7 @@ async def upload_document(
         )
 
     # Trigger ingestion job (async — doesn't block response)
-    run_id = _trigger_ingestion(tok, url)
+    run_id, trigger_err = _trigger_ingestion(tok, url)
 
     return {
         "success": True,
@@ -105,11 +107,12 @@ async def upload_document(
         "tier": tier,
         "size_kb": round(len(content) / 1024, 1),
         "run_id": run_id,
+        "trigger_error": trigger_err,
         "message": (
             f"'{safe_name}' uploaded to Tier {tier} volume. "
             "Ingestion job triggered — document will be available for querying in approximately 2–3 minutes."
             if run_id
-            else f"'{safe_name}' uploaded to Tier {tier} volume. Manually run the ingestion job to index it."
+            else f"'{safe_name}' uploaded to Tier {tier} volume. Job trigger failed: {trigger_err}"
         ),
     }
 

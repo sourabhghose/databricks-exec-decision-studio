@@ -1,4 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+// Module-level flag: set when docs update while Overview is unmounted
+let _pendingDocsRefresh = false;
+window.addEventListener("eds:docs-updated", () => { _pendingDocsRefresh = true; });
 import { createPortal } from "react-dom";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -438,11 +442,15 @@ export default function Overview() {
     }
   }
 
-  useEffect(() => { fetchData(); }, []);
-
-  // Re-fetch when a document upload + ingestion completes in DocumentLibrary
   useEffect(() => {
-    const handler = () => fetchData();
+    // Always refetch on mount — also catches the case where docs updated while unmounted
+    fetchData();
+    _pendingDocsRefresh = false;
+  }, []);
+
+  // Re-fetch when a document upload + ingestion completes while Overview is mounted
+  useEffect(() => {
+    const handler = () => { fetchData(); _pendingDocsRefresh = false; };
     window.addEventListener("eds:docs-updated", handler);
     return () => window.removeEventListener("eds:docs-updated", handler);
   }, []);

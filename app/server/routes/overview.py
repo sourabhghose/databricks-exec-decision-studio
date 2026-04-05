@@ -219,9 +219,11 @@ async def get_overview():
 
     # ── Document stats ─────────────────────────────────────────────
     doc_rows = _run_sql(f"""
-        SELECT COUNT(*) as total_chunks
+        SELECT COUNT(DISTINCT doc_id) as total_documents,
+               COUNT(*) as total_chunks
         FROM {CATALOG}.eds_processed.document_chunks
     """)
+    total_documents = int(doc_rows[0]["total_documents"]) if doc_rows else 22
     total_chunks = int(doc_rows[0]["total_chunks"]) if doc_rows else 1842
 
     return {
@@ -232,7 +234,7 @@ async def get_overview():
         "recent_decisions": recent_decisions,
         "action_summary": action_summary,
         "audit_stats": audit_stats,
-        "doc_stats": {"total_documents": 22, "total_chunks": total_chunks},
+        "doc_stats": {"total_documents": total_documents, "total_chunks": total_chunks},
     }
 
 
