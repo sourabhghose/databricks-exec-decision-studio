@@ -360,6 +360,7 @@ print(f"\nAll tables and volumes created successfully under catalog: {CATALOG}")
 import requests
 
 APP_NAME = "exec-decision-studio"
+INGESTION_JOB_ID = 950647315295103  # [EDS] 01 - Document Ingestion & Embedding
 SCHEMAS = ["eds_raw", "eds_synthetic", "eds_processed", "eds_actions", "eds_audit", "eds_evaluation", "eds_vectors"]
 TABLES = [
     f"{CATALOG}.eds_synthetic.kpi_timeseries",
@@ -435,6 +436,26 @@ if sp_uuid:
     # Volume access: read for ingestion, write for document upload via Files API
     grant(f"GRANT READ VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
     grant(f"GRANT WRITE VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
+
+    # Job trigger permission — CAN_MANAGE_RUN allows the SP to call jobs/run-now
+    # Required for automatic ingestion after document upload
+    for job_id in [INGESTION_JOB_ID]:
+        try:
+            rj = requests.patch(
+                f"{host}/api/2.0/permissions/jobs/{job_id}",
+                headers={**headers, "Content-Type": "application/json"},
+                json={"access_control_list": [{"user_name": sp_uuid, "permission_level": "CAN_MANAGE_RUN"}]},
+                timeout=15,
+            )
+            if rj.ok:
+                granted += 1
+                print(f"  [OK] CAN_MANAGE_RUN on job {job_id}")
+            else:
+                failed += 1
+                print(f"  [WARN] Job permission {job_id}: {rj.status_code} {rj.text[:100]}")
+        except Exception as ex:
+            failed += 1
+            print(f"  [WARN] Job permission {job_id}: {ex}")
 
     print(f"\n[OK] SP grants complete: {granted} succeeded, {failed} failed")
 else:
