@@ -440,6 +440,13 @@ export default function Overview() {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Re-fetch when a document upload + ingestion completes in DocumentLibrary
+  useEffect(() => {
+    const handler = () => fetchData();
+    window.addEventListener("eds:docs-updated", handler);
+    return () => window.removeEventListener("eds:docs-updated", handler);
+  }, []);
+
   function handleRefresh() {
     setLastRefresh(new Date());
     fetchData();

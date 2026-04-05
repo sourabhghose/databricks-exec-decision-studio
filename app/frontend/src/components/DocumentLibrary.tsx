@@ -170,6 +170,16 @@ export default function DocumentLibrary() {
   const [uploadRunId, setUploadRunId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  function fetchDocuments() {
+    fetch("/api/documents")
+      .then((r) => r.json())
+      .then((d) => {
+        setDocuments(d.data || []);
+        setDemo(d.demo);
+      })
+      .catch(() => {});
+  }
+
   // Poll ingestion job status
   useEffect(() => {
     if (!uploadRunId) return;
@@ -181,6 +191,9 @@ export default function DocumentLibrary() {
         if (d.state === "success") {
           setUploadStatus("success");
           setUploadRunId(null);
+          // Refresh document list and notify Overview to update its tiles
+          fetchDocuments();
+          window.dispatchEvent(new CustomEvent("eds:docs-updated"));
           setTimeout(() => setUploadStatus("idle"), 10000);
         } else if (d.state === "error") {
           setUploadStatus("error");
@@ -229,7 +242,7 @@ export default function DocumentLibrary() {
       })
       .catch(() => setDocuments([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, []);  // initial load only — subsequent refreshes use fetchDocuments()
 
   const filtered = documents.filter((d) => {
     const q = search.toLowerCase();
