@@ -4,8 +4,6 @@
 
 A production Databricks App that gives board directors, the CFO, and the C-suite real-time access to strategic intelligence — powered by Claude Sonnet 4.6, RAG over 22 board documents, live SQL KPIs, and a multi-agent supervisor architecture on Databricks Mosaic AI.
 
-**Live demo:** https://exec-decision-studio-7474646159107961.aws.databricksapps.com
-
 ---
 
 ## What it does
@@ -61,7 +59,7 @@ A production Databricks App that gives board directors, the CFO, and the C-suite
 
 ### Agent Architecture
 
-The supervisor follows a Mosaic AI Agent Bricks pattern:
+The supervisor uses LangChain:
 
 ```
 User query
