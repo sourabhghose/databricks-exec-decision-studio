@@ -805,7 +805,7 @@ async def chat_stream(req: ChatRequest):
             # Stream from Databricks LLM endpoint
             try:
                 import asyncio
-                async with httpx.AsyncClient(timeout=120) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15, read=300, write=30, pool=10)) as client:
                     async with client.stream(
                         "POST",
                         f"{workspace_url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
