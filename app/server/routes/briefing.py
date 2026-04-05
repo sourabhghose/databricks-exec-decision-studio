@@ -98,9 +98,18 @@ BRIEFING_TYPES = {
 }
 
 
-def _build_context(focus_areas: list) -> str:
-    """Assemble structured data context for the LLM. Tries live SQL, falls back to demo."""
+def _get_reporting_period() -> str:
+    """Return the latest KPI period string, e.g. '2024-12'."""
+    rows = _run_sql(f"SELECT MAX(period) as p FROM {CATALOG}.eds_synthetic.kpi_timeseries")
+    if rows and rows[0].get("p"):
+        return str(rows[0]["p"])
+    return ""
+
+
+def _build_context(focus_areas: list) -> tuple[str, str]:
+    """Assemble structured data context for the LLM. Returns (context_str, reporting_period)."""
     sections = []
+    reporting_period = _get_reporting_period()
 
     if "kpis" in focus_areas:
         live_kpis = _get_live_kpis()
@@ -139,14 +148,18 @@ def _build_context(focus_areas: list) -> str:
             )
         sections.append("## RECENT DECISIONS\n" + "\n".join(dec_lines))
 
-    return "\n\n".join(sections)
+    return "\n\n".join(sections), reporting_period
 
 
-def _stream_llm(prompt: str, role: str, briefing_label: str):
-    """Stream SSE tokens from the Databricks LLM endpoint."""
+
+@router.post("/api/briefing/stream")
+async def generate_briefing(req: BriefingRequest):
+    """Start streaming immediately; build context inside the generator to avoid proxy timeout."""
+    briefing_label = BRIEFING_TYPES.get(req.briefing_type, "Executive Briefing")
     tok = get_token()
     url = get_workspace_url()
-    start = time.time()
+    focus_areas = req.focus_areas
+    role = req.role
 
     system_prompt = (
         f"You are Alinta Energy's Executive Intelligence Assistant, producing a {briefing_label} "
@@ -156,9 +169,16 @@ def _stream_llm(prompt: str, role: str, briefing_label: str):
         "Do NOT include boilerplate disclaimers. Be commercially candid."
     )
 
-    if not tok:
-        # Fallback — no token available
-        def demo_stream():
+    def event_stream():
+        start = time.time()
+
+        # Build context inside the generator — connection is already open so no proxy timeout
+        context, reporting_period = _build_context(focus_areas)
+
+        if reporting_period:
+            yield f"data: {json.dumps({'type': 'meta', 'reporting_period': reporting_period})}\n\n"
+
+        if not tok:
             demo = (
                 f"## {briefing_label}\n\n"
                 "**Executive Summary**\n\n"
@@ -181,80 +201,68 @@ def _stream_llm(prompt: str, role: str, briefing_label: str):
                 "3. CFO to present FY26 debt refinancing options at next Board meeting\n"
             )
             for chunk in demo.split(" "):
-                data = json.dumps({"type": "token", "content": chunk + " "})
-                yield f"data: {data}\n\n"
-            latency = int((time.time() - start) * 1000)
-            yield f"data: {json.dumps({'type': 'done', 'latency_ms': latency})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'content': chunk + ' '})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'latency_ms': int((time.time() - start) * 1000)})}\n\n"
+            return
 
-        return StreamingResponse(demo_stream(), media_type="text/event-stream")
+        period_instruction = (
+            f" Where you reference the reporting period, use the exact value '{reporting_period}'"
+            " rather than a placeholder like '[Current Period]'."
+            if reporting_period else ""
+        )
+        period_line = f"Reporting period: {reporting_period}\n\n" if reporting_period else ""
+        prompt = (
+            f"Generate a comprehensive {briefing_label} for an Alinta Energy {role}.\n\n"
+            f"{period_line}"
+            f"Focus areas requested: {', '.join(focus_areas)}\n\n"
+            f"Current data context:\n{context}\n\n"
+            f"Produce the full briefing now.{period_instruction}"
+        )
 
-    payload = {
-        "model": LLM_ENDPOINT,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        "max_tokens": 1800,
-        "temperature": 0.3,
-        "stream": True,
-    }
+        payload = {
+            "model": LLM_ENDPOINT,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 4000,
+            "temperature": 0.3,
+            "stream": True,
+        }
 
-    def token_stream():
         try:
             with requests.post(
                 f"{url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
-                headers={
-                    "Authorization": f"Bearer {tok}",
-                    "Content-Type": "application/json",
-                },
+                headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
                 json=payload,
                 stream=True,
-                timeout=120,
+                timeout=180,
             ) as resp:
                 if not resp.ok:
-                    err = json.dumps({"type": "token", "content": f"[LLM error {resp.status_code}]"})
-                    yield f"data: {err}\n\n"
-                    return
-
-                for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    text = line.decode("utf-8") if isinstance(line, bytes) else line
-                    if text.startswith("data: "):
-                        chunk_str = text[6:]
-                        if chunk_str.strip() == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(chunk_str)
-                            content = (
-                                chunk.get("choices", [{}])[0]
-                                .get("delta", {})
-                                .get("content", "")
-                            )
-                            if content:
-                                yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
-                        except Exception:
-                            pass
-
+                    yield f"data: {json.dumps({'type': 'token', 'content': f'[LLM error {resp.status_code}]'})}\n\n"
+                else:
+                    for line in resp.iter_lines():
+                        if not line:
+                            continue
+                        text = line.decode("utf-8") if isinstance(line, bytes) else line
+                        if text.startswith("data: "):
+                            chunk_str = text[6:]
+                            if chunk_str.strip() == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(chunk_str)
+                                content = (
+                                    chunk.get("choices", [{}])[0]
+                                    .get("delta", {})
+                                    .get("content", "")
+                                )
+                                if content:
+                                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                            except Exception:
+                                pass
         except Exception as e:
             yield f"data: {json.dumps({'type': 'token', 'content': f'[Error: {e}]'})}\n\n"
 
-        latency = int((time.time() - start) * 1000)
-        yield f"data: {json.dumps({'type': 'done', 'latency_ms': latency})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'latency_ms': int((time.time() - start) * 1000)})}\n\n"
 
-    return StreamingResponse(token_stream(), media_type="text/event-stream")
-
-
-@router.post("/api/briefing/stream")
-async def generate_briefing(req: BriefingRequest):
-    briefing_label = BRIEFING_TYPES.get(req.briefing_type, "Executive Briefing")
-    context = _build_context(req.focus_areas)
-
-    prompt = (
-        f"Generate a comprehensive {briefing_label} for an Alinta Energy {req.role}.\n\n"
-        f"Focus areas requested: {', '.join(req.focus_areas)}\n\n"
-        f"Current data context:\n{context}\n\n"
-        "Produce the full briefing now."
-    )
-
-    return _stream_llm(prompt, req.role, briefing_label)
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

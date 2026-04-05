@@ -40,6 +40,49 @@ function renderMarkdown(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 
+  // Process markdown tables before block/inline replacements
+  html = html.replace(/((?:^\|[^\n]+\|\n?)+)/gm, (tableBlock) => {
+    const rows = tableBlock.trim().split("\n").filter((r) => r.trim());
+    const isSeparator = (row: string) => /^\|[\s\-|:]+\|$/.test(row.trim());
+    const parseRow = (row: string) =>
+      row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+
+    const dataRows = rows.filter((r) => !isSeparator(r));
+    if (dataRows.length < 1) return tableBlock;
+
+    const [headerRow, ...bodyRows] = dataRows;
+    const headers = parseRow(headerRow);
+
+    const headerCells = headers
+      .map(
+        (h) =>
+          `<th class="text-xs font-semibold text-slate-200 px-3 py-2 text-left border-b border-slate-700 whitespace-nowrap">${h}</th>`
+      )
+      .join("");
+
+    const bodyHTML = bodyRows
+      .map((row, i) => {
+        const cells = parseRow(row);
+        const bg = i % 2 === 0 ? "" : ' class="bg-slate-800/30"';
+        const tds = cells
+          .map(
+            (c) =>
+              `<td class="text-xs text-slate-300 px-3 py-1.5 border-b border-slate-700/40">${c}</td>`
+          )
+          .join("");
+        return `<tr${bg}>${tds}</tr>`;
+      })
+      .join("");
+
+    return (
+      `<div class="overflow-x-auto my-4 rounded-lg border border-slate-700">` +
+      `<table class="w-full border-collapse text-sm">` +
+      `<thead><tr class="bg-slate-800/60">${headerCells}</tr></thead>` +
+      `<tbody>${bodyHTML}</tbody>` +
+      `</table></div>`
+    );
+  });
+
   html = html.replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold text-slate-200 mt-4 mb-1.5">$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2 class="text-base font-bold text-gold mt-5 mb-2 pb-1 border-b border-dark-border">$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold text-slate-100 mb-3">$1</h1>');
@@ -70,6 +113,7 @@ export default function Briefing() {
   const [content, setContent] = useState("");
   const [latency, setLatency] = useState(0);
   const [generated, setGenerated] = useState(false);
+  const [reportingPeriod, setReportingPeriod] = useState("");
 
   const toggleFocus = (id: string) => {
     setFocusAreas((prev) =>
@@ -82,6 +126,7 @@ export default function Briefing() {
     setLoading(true);
     setContent("");
     setGenerated(false);
+    setReportingPeriod("");
 
     try {
       const res = await fetch("/api/briefing/stream", {
@@ -108,7 +153,9 @@ export default function Briefing() {
           if (line.startsWith("data: ")) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.type === "token") {
+              if (data.type === "meta") {
+                if (data.reporting_period) setReportingPeriod(data.reporting_period);
+              } else if (data.type === "token") {
                 setContent((prev) => prev + data.content);
               } else if (data.type === "done") {
                 setLatency(data.latency_ms || 0);
@@ -128,14 +175,68 @@ export default function Briefing() {
     }
   };
 
-  const handleDownload = () => {
+  const typeLabel = BRIEFING_TYPES.find((t) => t.id === briefingType)?.label || "Briefing";
+  const dateSlug = new Date().toISOString().slice(0, 10);
+
+  const handleDownloadMd = () => {
     const blob = new Blob([content], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    const typeLabel = BRIEFING_TYPES.find((t) => t.id === briefingType)?.label || "Briefing";
     a.href = url;
-    a.download = `Alinta_Energy_${typeLabel.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.md`;
+    a.download = `Alinta_Energy_${typeLabel.replace(/\s+/g, "_")}_${dateSlug}.md`;
     a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadPDF = () => {
+    const dateStr = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+    const periodStr = reportingPeriod ? ` · Reporting Period: ${reportingPeriod}` : "";
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${typeLabel}</title><style>
+      @page{margin:20mm}body{font-family:Arial,sans-serif;font-size:12pt;color:#1e293b;line-height:1.6}
+      .header{border-bottom:3px solid #F47920;padding-bottom:12px;margin-bottom:20px}
+      .brand{color:#F47920;font-size:11pt;font-weight:700;letter-spacing:.05em}
+      .meta{font-size:10pt;color:#64748b;margin-top:4px}
+      h1,h2,h3{color:#F47920}h2{font-size:14pt;margin-top:20pt}h3{font-size:12pt}
+      p{margin:8pt 0}strong{color:#0f172a}
+      code{background:#f1f5f9;padding:1px 4px;border-radius:3px;font-family:monospace;font-size:10pt}
+      table{width:100%;border-collapse:collapse;font-size:11pt;margin:12pt 0}
+      th{background:#fff3e8;color:#c4611a;border:1px solid #e2e8f0;padding:8px 10px;text-align:left;font-weight:600}
+      td{border:1px solid #e2e8f0;padding:7px 10px}
+      tr:nth-child(even) td{background:#f8fafc}
+      ul{padding-left:18px;margin:8pt 0}li{margin:3pt 0}
+    </style></head><body>
+      <div class="header">
+        <div class="brand">ALINTA ENERGY · EXECUTIVE DECISION STUDIO</div>
+        <div class="meta">${typeLabel} · Prepared for: ${role}${periodStr} · ${dateStr}</div>
+      </div>
+      <div class="content">${renderMarkdown(content)}</div>
+      <script>window.onload=function(){window.print();setTimeout(()=>window.close(),1500)}<\/script>
+    </body></html>`);
+    win.document.close();
+  };
+
+  const handleDownloadPPTX = async () => {
+    const res = await fetch("/api/export/pptx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content,
+        agent: typeLabel,
+        sources: [],
+        title: `${typeLabel} — ${role}`,
+      }),
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Alinta_Energy_${typeLabel.replace(/\s+/g, "_")}_${dateSlug}.pptx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
@@ -258,14 +359,35 @@ export default function Briefing() {
             )}
           </div>
           {generated && content && (
-            <button
-              onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400
-                border border-dark-border hover:text-gold hover:border-gold/30 transition-colors cursor-pointer"
-            >
-              <Download size={12} />
-              Export
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDownloadPDF}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400
+                  border border-dark-border hover:text-gold hover:border-gold/30 transition-colors cursor-pointer"
+                title="Export as PDF (print dialog)"
+              >
+                <Download size={12} />
+                PDF
+              </button>
+              <button
+                onClick={handleDownloadPPTX}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400
+                  border border-dark-border hover:text-gold hover:border-gold/30 transition-colors cursor-pointer"
+                title="Export as PowerPoint"
+              >
+                <Download size={12} />
+                PPTX
+              </button>
+              <button
+                onClick={handleDownloadMd}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400
+                  border border-dark-border hover:text-gold hover:border-gold/30 transition-colors cursor-pointer"
+                title="Export as Markdown"
+              >
+                <Download size={12} />
+                MD
+              </button>
+            </div>
           )}
         </div>
 
@@ -311,8 +433,10 @@ export default function Briefing() {
                   <p className="text-xs text-slate-500">
                     Prepared for: <span className="text-slate-300">{role}</span>
                   </p>
-                  <p className="text-xs text-slate-600">
-                    {new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}
+                  <p className="text-xs text-slate-500">
+                    {reportingPeriod
+                      ? `Reporting Period: ${reportingPeriod}`
+                      : new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}
                   </p>
                 </div>
               </div>
@@ -332,15 +456,37 @@ export default function Briefing() {
                 </div>
               )}
 
-              {/* Footer */}
-              {generated && !loading && (
-                <div className="mt-8 pt-4 border-t border-dark-border/50 text-[11px] text-slate-600">
-                  Generated by Databricks Mosaic AI · {BRIEFING_TYPES.find((t) => t.id === briefingType)?.label} · {role}
-                  {" "}· {new Date().toLocaleDateString("en-AU")}
-                  <br />
-                  This briefing is based on synthetic demonstration data and is for illustrative purposes only.
+              {/* Export buttons — visible at bottom after generation */}
+              {generated && !loading && content && (
+                <div className="mt-8 pt-4 border-t border-dark-border/50 flex items-center gap-2">
+                  <span className="text-xs text-slate-600 mr-2">Export as:</span>
+                  <button
+                    onClick={handleDownloadPDF}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400
+                      border border-dark-border hover:text-gold hover:border-gold/30 transition-colors cursor-pointer"
+                  >
+                    <Download size={12} />
+                    PDF
+                  </button>
+                  <button
+                    onClick={handleDownloadPPTX}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400
+                      border border-dark-border hover:text-gold hover:border-gold/30 transition-colors cursor-pointer"
+                  >
+                    <Download size={12} />
+                    PPTX
+                  </button>
+                  <button
+                    onClick={handleDownloadMd}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400
+                      border border-dark-border hover:text-gold hover:border-gold/30 transition-colors cursor-pointer"
+                  >
+                    <Download size={12} />
+                    Markdown
+                  </button>
                 </div>
               )}
+
             </div>
           )}
         </div>
