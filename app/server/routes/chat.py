@@ -677,10 +677,9 @@ async def chat(req: ChatRequest):
 async def chat_stream(req: ChatRequest):
     """
     Streaming chat endpoint using SSE.
-    All heavy work (intent classification, VS retrieval, LLM call) happens inside
-    the generator so the HTTP response opens immediately — avoiding proxy timeouts.
-    LLM is called synchronously (non-streaming) to guarantee a complete response,
-    then streamed word-by-word to the client.
+    Uses a synchronous generator (same pattern as briefing) so FastAPI runs it
+    in a thread pool — requests.iter_lines() streams tokens directly from the LLM
+    without buffering or async event-loop issues.
     """
     if not req.message.strip():
         async def empty():
@@ -688,7 +687,6 @@ async def chat_stream(req: ChatRequest):
         return StreamingResponse(empty(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # Snapshot request values — generator closes over these
     message = req.message
     history = req.history or []
     tier = TIER_MAP.get(req.role, 2)
@@ -696,8 +694,8 @@ async def chat_stream(req: ChatRequest):
     workspace_url = get_workspace_url()
     use_demo = not tok
 
-    async def generate():
-        import asyncio
+    def generate():
+        """Synchronous generator — runs in uvicorn thread pool, never blocks the event loop."""
         start = time.time()
 
         # ── 1. Intent classification ──────────────────────────────────────────
@@ -761,38 +759,63 @@ async def chat_stream(req: ChatRequest):
         elif intent in ("competitive", "briefing"):
             context = _get_market_context() + "\n\n" + context
 
-        # ── 4. Emit meta (opens SSE before LLM call) ─────────────────────────
+        # ── 4. Emit meta ──────────────────────────────────────────────────────
         yield f"data: {json.dumps({'type': 'meta', 'agent': intent, 'sources': source_ids[:5]})}\n\n"
 
-        # ── 5. Get full LLM response (non-streaming → guaranteed complete) ────
+        # ── 5. Demo path: stream word-by-word ────────────────────────────────
         if use_demo:
             full_answer = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
-        else:
-            messages = [
-                {"role": "system", "content": f"{AGENT_PROMPTS[intent]}\n\nContext:\n{context}"},
-                *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in history[-4:]],
-                {"role": "user", "content": message},
-            ]
-            # Run LLM in a thread so the event loop stays free to send heartbeats.
-            # SSE comment lines (": ...") keep the proxy connection alive while we wait.
-            llm_task = asyncio.ensure_future(
-                asyncio.to_thread(_call_llm, messages, 10000)
-            )
-            while not llm_task.done():
-                await asyncio.sleep(5)
-                yield ": keepalive\n\n"
-            full_answer = llm_task.result()
-            if not full_answer or full_answer.startswith("LLM error"):
-                print(f"[CHAT] LLM failed ({full_answer[:100]}), falling back to demo")
-                full_answer = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
+            words = full_answer.split(" ")
+            for i, word in enumerate(words):
+                sep = " " if i < len(words) - 1 else ""
+                yield f"data: {json.dumps({'type': 'token', 'content': word + sep})}\n\n"
+            chart = _get_chart_data(message, intent)
+            if chart:
+                yield f"data: {json.dumps({'type': 'chart', **chart})}\n\n"
+            elapsed = int((time.time() - start) * 1000)
+            yield f"data: {json.dumps({'type': 'done', 'latency_ms': elapsed, 'confidence': 0.72})}\n\n"
+            return
 
-        # ── 6. Stream answer word-by-word ─────────────────────────────────────
-        words = full_answer.split(" ")
-        for i, word in enumerate(words):
-            sep = " " if i < len(words) - 1 else ""
-            yield f"data: {json.dumps({'type': 'token', 'content': word + sep})}\n\n"
-            if i % 10 == 0:
-                await asyncio.sleep(0.008)
+        # ── 6. Live path: stream directly from LLM (same as briefing) ────────
+        llm_messages = [
+            {"role": "system", "content": f"{AGENT_PROMPTS[intent]}\n\nContext:\n{context}"},
+            *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in history[-4:]],
+            {"role": "user", "content": message},
+        ]
+        full_answer = ""
+        try:
+            with requests.post(
+                f"{workspace_url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
+                headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+                json={"messages": llm_messages, "max_tokens": 8000, "temperature": 0.1, "stream": True},
+                stream=True,
+                timeout=300,
+            ) as resp:
+                if not resp.ok:
+                    raise RuntimeError(f"LLM {resp.status_code}: {resp.text[:200]}")
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    text = line.decode("utf-8") if isinstance(line, bytes) else line
+                    if not text.startswith("data: "):
+                        continue
+                    chunk_str = text[6:]
+                    if chunk_str.strip() == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(chunk_str)
+                        token = data["choices"][0].get("delta", {}).get("content", "")
+                        if token:
+                            full_answer += token
+                            yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[CHAT] LLM error: {e}")
+            if not full_answer:
+                full_answer = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
+                for word in full_answer.split(" "):
+                    yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
 
         # ── 7. Chart + done ───────────────────────────────────────────────────
         chart = _get_chart_data(message, intent)
@@ -800,7 +823,7 @@ async def chat_stream(req: ChatRequest):
             yield f"data: {json.dumps({'type': 'chart', **chart})}\n\n"
 
         elapsed = int((time.time() - start) * 1000)
-        confidence = 0.72 if use_demo else min(0.97, 0.55 + (len(docs) / 5) * 0.38)
+        confidence = min(0.97, 0.55 + (len(docs) / 5) * 0.38)
         yield f"data: {json.dumps({'type': 'done', 'latency_ms': elapsed, 'confidence': round(confidence, 2)})}\n\n"
 
         _log_audit(message, full_answer[:400], intent, tier, source_ids, confidence, elapsed)
