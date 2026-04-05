@@ -391,7 +391,7 @@ def _call_llm(messages: list, max_tokens: int = 1024) -> str:
             f"{url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
             headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
             json={"messages": messages, "max_tokens": max_tokens, "temperature": 0.1},
-            timeout=90,
+            timeout=300,
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
@@ -773,7 +773,15 @@ async def chat_stream(req: ChatRequest):
                 *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in history[-4:]],
                 {"role": "user", "content": message},
             ]
-            full_answer = _call_llm(messages, max_tokens=10000)
+            # Run LLM in a thread so the event loop stays free to send heartbeats.
+            # SSE comment lines (": ...") keep the proxy connection alive while we wait.
+            llm_task = asyncio.ensure_future(
+                asyncio.to_thread(_call_llm, messages, 10000)
+            )
+            while not llm_task.done():
+                await asyncio.sleep(5)
+                yield ": keepalive\n\n"
+            full_answer = llm_task.result()
             if not full_answer or full_answer.startswith("LLM error"):
                 print(f"[CHAT] LLM failed ({full_answer[:100]}), falling back to demo")
                 full_answer = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
