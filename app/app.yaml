@@ -9,10 +9,6 @@ command:
   - "8000"
 
 resources:
-  - name: warehouse
-    sql_warehouse:
-      id: 33baaa9523773520
-      permission: CAN_USE
   - name: llm_endpoint
     serving_endpoint:
       name: databricks-claude-sonnet-4-6
@@ -20,4 +16,4 @@ resources:
 
 env:
   - name: DATABRICKS_WAREHOUSE_ID
-    valueFrom: warehouse
+    value: "33baaa9523773520"
