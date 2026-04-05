@@ -432,8 +432,9 @@ if sp_uuid:
     for tbl in MODIFY_TABLES:
         grant(f"GRANT MODIFY ON TABLE {tbl} TO {sp_ref}")
 
-    # Volume read access for document ingestion
+    # Volume access: read for ingestion, write for document upload via Files API
     grant(f"GRANT READ VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
+    grant(f"GRANT WRITE VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
 
     print(f"\n[OK] SP grants complete: {granted} succeeded, {failed} failed")
 else:
