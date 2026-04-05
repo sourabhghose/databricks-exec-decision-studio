@@ -308,7 +308,7 @@ def _call_supervisor(query: str, history: list, role: str) -> str | None:
         r = requests.post(
             f"{url}/serving-endpoints/{SUPERVISOR_ENDPOINT}/invocations",
             headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-            json={"messages": messages, "max_tokens": 4000, "temperature": 0.1},
+            json={"messages": messages, "max_tokens": 10000, "temperature": 0.1},
             timeout=90,
         )
         if not r.ok:
@@ -807,7 +807,7 @@ async def chat_stream(req: ChatRequest):
                         "POST",
                         f"{workspace_url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
                         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-                        json={"messages": messages, "max_tokens": 4000, "temperature": 0.1, "stream": True},
+                        json={"messages": messages, "max_tokens": 10000, "temperature": 0.1, "stream": True},
                     ) as response:
                         if response.status_code != 200:
                             body = await response.aread()
