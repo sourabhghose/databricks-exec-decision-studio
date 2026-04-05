@@ -777,17 +777,23 @@ async def chat_stream(req: ChatRequest):
             return
 
         # ── 6. Live path: stream directly from LLM (same as briefing) ────────
+        # Truncate history content to keep input tokens manageable
+        trimmed_history = [
+            {"role": m.get("role", "user"), "content": (m.get("content", "") or "")[:400]}
+            for m in history[-4:]
+        ]
         llm_messages = [
             {"role": "system", "content": f"{AGENT_PROMPTS[intent]}\n\nContext:\n{context}"},
-            *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in history[-4:]],
+            *trimmed_history,
             {"role": "user", "content": message},
         ]
         full_answer = ""
+        finish_reason = "unknown"
         try:
             with requests.post(
                 f"{workspace_url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
                 headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-                json={"messages": llm_messages, "max_tokens": 8000, "temperature": 0.1, "stream": True},
+                json={"messages": llm_messages, "max_tokens": 4000, "temperature": 0.1, "stream": True},
                 stream=True,
                 timeout=300,
             ) as resp:
@@ -804,18 +810,24 @@ async def chat_stream(req: ChatRequest):
                         break
                     try:
                         data = json.loads(chunk_str)
-                        token = data["choices"][0].get("delta", {}).get("content", "")
+                        choice = data["choices"][0]
+                        fr = choice.get("finish_reason")
+                        if fr:
+                            finish_reason = fr
+                            print(f"[CHAT] finish_reason={fr} total_tokens={len(full_answer.split())}")
+                        token = choice.get("delta", {}).get("content", "")
                         if token:
                             full_answer += token
                             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
                     except Exception:
                         pass
         except Exception as e:
-            print(f"[CHAT] LLM error: {e}")
+            print(f"[CHAT] LLM stream error: {e}")
             if not full_answer:
                 full_answer = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
                 for word in full_answer.split(" "):
                     yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
+        print(f"[CHAT] intent={intent} finish={finish_reason} chars={len(full_answer)}")
 
         # ── 7. Chart + done ───────────────────────────────────────────────────
         chart = _get_chart_data(message, intent)
