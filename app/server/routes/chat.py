@@ -8,7 +8,6 @@ import time
 import uuid
 from typing import List, Optional
 
-import httpx
 import requests
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -676,193 +675,127 @@ async def chat(req: ChatRequest):
 
 @router.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
-    """Streaming chat endpoint using SSE."""
+    """
+    Streaming chat endpoint using SSE.
+    All heavy work (intent classification, VS retrieval, LLM call) happens inside
+    the generator so the HTTP response opens immediately — avoiding proxy timeouts.
+    LLM is called synchronously (non-streaming) to guarantee a complete response,
+    then streamed word-by-word to the client.
+    """
     if not req.message.strip():
         async def empty():
             yield f"data: {json.dumps({'type': 'done', 'latency_ms': 0, 'confidence': 0})}\n\n"
-        return StreamingResponse(empty(), media_type="text/event-stream")
+        return StreamingResponse(empty(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    # Snapshot request values — generator closes over these
+    message = req.message
+    history = req.history or []
+    tier = TIER_MAP.get(req.role, 2)
     tok = get_token()
     workspace_url = get_workspace_url()
-    tier = TIER_MAP.get(req.role, 2)
     use_demo = not tok
 
-    # Classify intent (keyword fallback when no token)
-    if use_demo:
-        q = req.message.lower()
-        if any(w in q for w in ("kpi", "metric", "performance", "scorecard", "target", "anomaly")):
-            intent = "kpi_monitor"
-        elif any(w in q for w in ("competitive", "competitor", "market share", "origin", "agl")):
-            intent = "competitive"
-        elif any(w in q for w in ("brief", "briefing", "summary", "update", "overview")):
-            intent = "briefing"
-        elif any(w in q for w in ("gap", "blind spot", "missing", "weakness", "risk")):
-            intent = "strategic_gap"
+    async def generate():
+        import asyncio
+        start = time.time()
+
+        # ── 1. Intent classification ──────────────────────────────────────────
+        if use_demo:
+            q = message.lower()
+            if any(w in q for w in ("kpi", "metric", "performance", "scorecard", "target", "anomaly")):
+                intent = "kpi_monitor"
+            elif any(w in q for w in ("competitive", "competitor", "market share", "origin", "agl")):
+                intent = "competitive"
+            elif any(w in q for w in ("brief", "briefing", "summary", "update", "overview")):
+                intent = "briefing"
+            elif any(w in q for w in ("gap", "blind spot", "missing", "weakness", "risk")):
+                intent = "strategic_gap"
+            else:
+                intent = "doc_qa"
+            docs: list = []
         else:
-            intent = "doc_qa"
-        docs = []
-    else:
-        intent = _classify_intent(req.message)
-        docs = _retrieve_docs(req.message, tier=tier)
+            intent = _classify_intent(message)
+            docs = _retrieve_docs(message, tier=tier)
 
-    # Access control: enforce tier restrictions per supervisor policy
-    TIER_RESTRICTED = {"strategic_gap": 2, "competitive": 2, "evaluation": 3}
-    required_tier = TIER_RESTRICTED.get(intent)
-    if required_tier and tier > required_tier:
-        access_msg = (
-            f"Access restricted: the **{intent.replace('_', ' ').title()} Agent** requires "
-            f"Tier {required_tier} (Executive Leadership Team) access or above. "
-            f"Your current role is Tier {tier}. Please contact your system administrator "
-            f"if you believe this is incorrect."
-        )
-
-        async def _denied():
+        # ── 2. Access control ─────────────────────────────────────────────────
+        TIER_RESTRICTED = {"strategic_gap": 2, "competitive": 2, "evaluation": 3}
+        required_tier = TIER_RESTRICTED.get(intent)
+        if required_tier and tier > required_tier:
+            access_msg = (
+                f"Access restricted: the **{intent.replace('_', ' ').title()} Agent** "
+                f"requires Tier {required_tier} (Executive Leadership Team) access or above. "
+                f"Your current role is Tier {tier}."
+            )
             yield f"data: {json.dumps({'type': 'meta', 'agent': 'supervisor', 'sources': []})}\n\n"
             for word in access_msg.split(" "):
                 yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'latency_ms': 0, 'confidence': 0.0})}\n\n"
+            return
 
-        return StreamingResponse(_denied(), media_type="text/event-stream",
-                                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+        # ── 3. Build context ──────────────────────────────────────────────────
+        source_ids: list[str] = []
+        context_parts: list[str] = []
+        for d in docs:
+            did = d.get("doc_id", "?")
+            if did not in source_ids:
+                source_ids.append(did)
+            chunk = (d.get("chunk_text", "") or "")[:600]
+            context_parts.append(f"[{did}] {d.get('doc_title', '')}\n{chunk}")
 
-    source_ids: list[str] = []
-    context_parts: list[str] = []
-    for d in docs:
-        did = d.get("doc_id", "?")
-        if did not in source_ids:
-            source_ids.append(did)
-        # Cap each chunk at 600 chars to preserve output token budget
-        chunk = (d.get("chunk_text", "") or "")[:600]
-        context_parts.append(f"[{did}] {d.get('doc_title', '')}\n{chunk}")
-
-    # Always have context — fall back to demo data when VS returns nothing
-    if context_parts:
-        context = "\n\n---\n\n".join(context_parts)
-    else:
-        q = req.message.lower()
-        if any(w in q for w in ("risk", "risks")):
-            context = DEMO_RISK_CONTEXT
-        elif any(w in q for w in ("kpi", "metric", "performance", "scorecard")):
-            context = DEMO_KPI_CONTEXT
+        if context_parts:
+            context = "\n\n---\n\n".join(context_parts)
         else:
-            context = DEMO_DOC_CONTEXT
+            q = message.lower()
+            if any(w in q for w in ("risk", "risks")):
+                context = DEMO_RISK_CONTEXT
+            elif any(w in q for w in ("kpi", "metric", "performance", "scorecard")):
+                context = DEMO_KPI_CONTEXT
+            else:
+                context = DEMO_DOC_CONTEXT
 
-    # Inject agent-specific live data on top of document context
-    if intent == "kpi_monitor":
-        context = "KPI Data (latest period):\n" + _get_kpi_context() + "\n\n" + context
-    elif intent == "strategic_gap":
-        context = _get_risk_context() + "\n\n" + context
-    elif intent in ("competitive", "briefing"):
-        context = _get_market_context() + "\n\n" + context
+        if intent == "kpi_monitor":
+            context = "KPI Data (latest period):\n" + _get_kpi_context() + "\n\n" + context
+        elif intent == "strategic_gap":
+            context = _get_risk_context() + "\n\n" + context
+        elif intent in ("competitive", "briefing"):
+            context = _get_market_context() + "\n\n" + context
 
-    messages = [
-        {"role": "system", "content": f"{AGENT_PROMPTS[intent]}\n\nContext:\n{context}"},
-        # Limit history to 4 turns to preserve output token budget
-        *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in (req.history or [])[-4:]],
-        {"role": "user", "content": req.message},
-    ]
+        # ── 4. Emit meta (opens SSE before LLM call) ─────────────────────────
+        yield f"data: {json.dumps({'type': 'meta', 'agent': intent, 'sources': source_ids[:5]})}\n\n"
 
-    # Try Supervisor Agent (MLflow RAG chain) if configured — synchronous call, then stream result
-    supervisor_answer: str | None = None
-    effective_agent = intent
-    if tok and not use_demo:
-        supervisor_answer = _call_supervisor(req.message, req.history or [], req.role)
-        if supervisor_answer:
-            effective_agent = "supervisor"
-            print(f"[SUPERVISOR] Answer received ({len(supervisor_answer)} chars)")
-
-    start = time.time()
-
-    async def generate():
-        full_answer = ""
-
-        # Send metadata first
-        meta = {"type": "meta", "agent": effective_agent, "sources": source_ids[:5]}
-        yield f"data: {json.dumps(meta)}\n\n"
-
-        if supervisor_answer:
-            # Stream the supervisor answer word-by-word (same UX as demo mode)
-            import asyncio
-            full_answer = supervisor_answer
-            words = supervisor_answer.split(" ")
-            for i, word in enumerate(words):
-                sep = " " if i < len(words) - 1 else ""
-                yield f"data: {json.dumps({'type': 'token', 'content': word + sep})}\n\n"
-                if i % 8 == 0:
-                    await asyncio.sleep(0.008)
-        elif use_demo:
-            # Stream pre-written demo response word-by-word
-            import asyncio
-            demo_text = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
-            full_answer = demo_text
-            words = demo_text.split(" ")
-            for i, word in enumerate(words):
-                sep = " " if i < len(words) - 1 else ""
-                yield f"data: {json.dumps({'type': 'token', 'content': word + sep})}\n\n"
-                if i % 8 == 0:
-                    await asyncio.sleep(0.015)
+        # ── 5. Get full LLM response (non-streaming → guaranteed complete) ────
+        if use_demo:
+            full_answer = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
         else:
-            # Stream from Databricks LLM endpoint
-            try:
-                import asyncio
-                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15, read=300, write=30, pool=10)) as client:
-                    async with client.stream(
-                        "POST",
-                        f"{workspace_url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
-                        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-                        json={"messages": messages, "max_tokens": 10000, "temperature": 0.1, "stream": True},
-                    ) as response:
-                        if response.status_code != 200:
-                            body = await response.aread()
-                            raise RuntimeError(f"LLM {response.status_code}: {body[:300]}")
-                        async for line in response.aiter_lines():
-                            if line.startswith("data: "):
-                                chunk = line[6:]
-                                if chunk.strip() == "[DONE]":
-                                    break
-                                try:
-                                    data = json.loads(chunk)
-                                    token = data["choices"][0].get("delta", {}).get("content", "")
-                                    if token:
-                                        full_answer += token
-                                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
-                                except Exception:
-                                    pass
+            messages = [
+                {"role": "system", "content": f"{AGENT_PROMPTS[intent]}\n\nContext:\n{context}"},
+                *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in history[-4:]],
+                {"role": "user", "content": message},
+            ]
+            full_answer = _call_llm(messages, max_tokens=10000)
+            if not full_answer or full_answer.startswith("LLM error"):
+                print(f"[CHAT] LLM failed ({full_answer[:100]}), falling back to demo")
+                full_answer = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
 
-                # If LLM produced nothing (empty stream), fall back to demo
-                if not full_answer:
-                    raise RuntimeError("LLM returned empty stream")
+        # ── 6. Stream answer word-by-word ─────────────────────────────────────
+        words = full_answer.split(" ")
+        for i, word in enumerate(words):
+            sep = " " if i < len(words) - 1 else ""
+            yield f"data: {json.dumps({'type': 'token', 'content': word + sep})}\n\n"
+            if i % 10 == 0:
+                await asyncio.sleep(0.008)
 
-            except Exception as e:
-                print(f"[CHAT] LLM stream error, falling back to demo: {e}")
-                # Fallback to demo on any streaming error
-                import asyncio
-                demo_text = DEMO_RESPONSES.get(intent, DEMO_RESPONSES["doc_qa"])
-                full_answer = demo_text
-                words = demo_text.split(" ")
-                for i, word in enumerate(words):
-                    sep = " " if i < len(words) - 1 else ""
-                    yield f"data: {json.dumps({'type': 'token', 'content': word + sep})}\n\n"
-                    if i % 8 == 0:
-                        await asyncio.sleep(0.015)
-
-        # Send chart data if applicable
-        chart = _get_chart_data(req.message, intent)
+        # ── 7. Chart + done ───────────────────────────────────────────────────
+        chart = _get_chart_data(message, intent)
         if chart:
             yield f"data: {json.dumps({'type': 'chart', **chart})}\n\n"
 
-        # Send done signal with confidence
         elapsed = int((time.time() - start) * 1000)
-        if use_demo:
-            # Demo mode: synthesised answer, fixed realistic score
-            confidence = 0.72
-        else:
-            confidence = min(0.97, 0.55 + (len(docs) / 5) * 0.38)
-        done = {"type": "done", "latency_ms": elapsed, "confidence": round(confidence, 2)}
-        yield f"data: {json.dumps(done)}\n\n"
+        confidence = 0.72 if use_demo else min(0.97, 0.55 + (len(docs) / 5) * 0.38)
+        yield f"data: {json.dumps({'type': 'done', 'latency_ms': elapsed, 'confidence': round(confidence, 2)})}\n\n"
 
-        # Audit log (best-effort)
-        _log_audit(req.message, full_answer[:400], intent, tier, source_ids, confidence, elapsed)
+        _log_audit(message, full_answer[:400], intent, tier, source_ids, confidence, elapsed)
 
     return StreamingResponse(
         generate(),
