@@ -636,7 +636,8 @@ async def chat(req: ChatRequest):
         did = d.get("doc_id", "?")
         if did not in source_ids:
             source_ids.append(did)
-        context_parts.append(f"[{did}] {d.get('doc_title', '')}\n{d.get('chunk_text', '')}")
+        chunk = (d.get("chunk_text", "") or "")[:600]
+        context_parts.append(f"[{did}] {d.get('doc_title', '')}\n{chunk}")
 
     context = "\n\n---\n\n".join(context_parts) or "No relevant documents retrieved."
 
@@ -646,17 +647,16 @@ async def chat(req: ChatRequest):
     elif intent in ("competitive", "briefing"):
         context = _get_market_context() + "\n\n" + context
 
-    # 4) Build messages (include recent history)
+    # 4) Build messages (limit history to 4 turns to preserve output token budget)
     messages = [
         {"role": "system", "content": f"{AGENT_PROMPTS[intent]}\n\nContext:\n{context}"},
     ]
-    # Append last 6 history turns
-    for h in (req.history or [])[-6:]:
+    for h in (req.history or [])[-4:]:
         messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
     messages.append({"role": "user", "content": req.message})
 
     # 5) Call LLM
-    answer = _call_llm(messages, max_tokens=4000)
+    answer = _call_llm(messages, max_tokens=10000)
     elapsed = int((time.time() - start) * 1000)
     confidence = min(0.97, 0.55 + (len(docs) / 5) * 0.38)
 
@@ -731,7 +731,9 @@ async def chat_stream(req: ChatRequest):
         did = d.get("doc_id", "?")
         if did not in source_ids:
             source_ids.append(did)
-        context_parts.append(f"[{did}] {d.get('doc_title', '')}\n{d.get('chunk_text', '')}")
+        # Cap each chunk at 600 chars to preserve output token budget
+        chunk = (d.get("chunk_text", "") or "")[:600]
+        context_parts.append(f"[{did}] {d.get('doc_title', '')}\n{chunk}")
 
     # Always have context — fall back to demo data when VS returns nothing
     if context_parts:
@@ -755,7 +757,8 @@ async def chat_stream(req: ChatRequest):
 
     messages = [
         {"role": "system", "content": f"{AGENT_PROMPTS[intent]}\n\nContext:\n{context}"},
-        *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in (req.history or [])[-6:]],
+        # Limit history to 4 turns to preserve output token budget
+        *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in (req.history or [])[-4:]],
         {"role": "user", "content": req.message},
     ]
 
