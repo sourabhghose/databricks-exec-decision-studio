@@ -62,32 +62,48 @@ AGENT_PROMPTS = {
     ),
 }
 
-# ── Token cache ──────────────────────────────────────────────────────────────
-_token_cache: dict = {}
+# ── Auth ─────────────────────────────────────────────────────────────────────
 _wh_cache: dict = {}
+_sdk_client = None  # WorkspaceClient singleton — SDK handles token refresh internally
+
+
+def _get_sdk_client():
+    global _sdk_client
+    if _sdk_client is None:
+        try:
+            from databricks.sdk import WorkspaceClient
+            _sdk_client = WorkspaceClient()
+        except Exception as e:
+            print(f"[EDS] SDK init failed: {e}")
+    return _sdk_client
 
 
 def get_token() -> str:
-    """Get bearer token for Databricks API calls."""
-    if _token_cache.get("val"):  # only cache non-empty tokens
-        return _token_cache["val"]
+    """Get a valid bearer token for Databricks API calls.
 
-    tok = os.environ.get("DATABRICKS_TOKEN", "")
-    if not tok:
-        try:
-            from databricks.sdk import WorkspaceClient
+    For PATs (DATABRICKS_TOKEN env var) — returned directly (long-lived).
+    For M2M OAuth (Databricks Apps SP) — always fetched via SDK so the SDK
+    can handle automatic refresh before the 1-hour expiry.
+    """
+    # PAT: long-lived, return directly
+    pat = os.environ.get("DATABRICKS_TOKEN", "")
+    if pat:
+        return pat
 
-            w = WorkspaceClient()
-            # authenticate() returns a dict like {"Authorization": "Bearer ..."}
-            auth = w.config.authenticate()
-            if auth:
-                tok = auth.get("Authorization", "").replace("Bearer ", "")
-        except Exception as e:
-            print(f"[EDS] SDK auth failed: {e}")
+    # M2M OAuth: ask SDK each time — it caches with proper TTL internally
+    try:
+        w = _get_sdk_client()
+        if w is None:
+            return ""
+        auth = w.config.authenticate()
+        if auth:
+            tok = auth.get("Authorization", "").replace("Bearer ", "")
+            if tok:
+                return tok
+    except Exception as e:
+        print(f"[EDS] SDK auth failed: {e}")
 
-    _token_cache["val"] = tok or ""
-    print(f"[EDS] Token ready: {bool(_token_cache['val'])}")
-    return _token_cache["val"]
+    return ""
 
 
 def get_workspace_url() -> str:

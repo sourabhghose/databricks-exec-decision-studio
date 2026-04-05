@@ -18,8 +18,8 @@ VOLUME_ROOT = f"/Volumes/{CATALOG}/eds_raw/documents"
 INGESTION_JOB_ID = 950647315295103  # [EDS] 01 - Document Ingestion & Embedding
 
 
-def _files_api_upload(token: str, workspace_url: str, volume_path: str, content: bytes) -> bool:
-    """Upload bytes to a UC Volume via the Databricks Files API."""
+def _files_api_upload(token: str, workspace_url: str, volume_path: str, content: bytes) -> tuple[bool, str]:
+    """Upload bytes to a UC Volume via the Databricks Files API. Returns (ok, error_detail)."""
     url = f"{workspace_url}/api/2.0/fs/files{volume_path}"
     try:
         r = requests.put(
@@ -29,12 +29,13 @@ def _files_api_upload(token: str, workspace_url: str, volume_path: str, content:
             timeout=60,
         )
         if r.ok:
-            return True
-        print(f"[upload] Files API {r.status_code}: {r.text[:200]}")
-        return False
+            return True, ""
+        detail = f"HTTP {r.status_code}: {r.text[:300]}"
+        print(f"[upload] Files API {detail}")
+        return False, detail
     except Exception as e:
         print(f"[upload] Files API error: {e}")
-        return False
+        return False, str(e)[:200]
 
 
 def _trigger_ingestion(token: str, workspace_url: str) -> str | None:
@@ -87,11 +88,11 @@ async def upload_document(
     volume_path = f"{VOLUME_ROOT}/tier{tier}/{safe_name}"
 
     # Upload to volume
-    ok = _files_api_upload(tok, url, volume_path, content)
+    ok, upload_err = _files_api_upload(tok, url, volume_path, content)
     if not ok:
         return JSONResponse(
             status_code=502,
-            content={"error": "Failed to upload to Unity Catalog Volume. Check token permissions."},
+            content={"error": f"Failed to upload to Unity Catalog Volume. {upload_err}"},
         )
 
     # Trigger ingestion job (async — doesn't block response)
