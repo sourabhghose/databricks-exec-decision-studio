@@ -18,7 +18,6 @@ from server.config import (
     CATALOG,
     DOC_TITLES,
     LLM_ENDPOINT,
-    SUPERVISOR_ENDPOINT,
     TIER_MAP,
     VS_INDEX,
     get_token,
@@ -285,50 +284,6 @@ def _get_chart_data(query: str, intent: str) -> dict | None:
         }
 
     return None
-
-
-def _call_supervisor(query: str, history: list, role: str) -> str | None:
-    """
-    Try the MLflow-served Supervisor Agent (RAG chain) if SUPERVISOR_ENDPOINT is configured.
-    Accepts both OpenAI-chat format and MLflow pyfunc format responses.
-    Returns the answer string, or None if unavailable/failed.
-    """
-    if not SUPERVISOR_ENDPOINT:
-        return None
-    tok = get_token()
-    url = get_workspace_url()
-    if not tok:
-        return None
-    messages = [
-        *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in (history or [])[-6:]],
-        {"role": "user", "content": query},
-    ]
-    try:
-        r = requests.post(
-            f"{url}/serving-endpoints/{SUPERVISOR_ENDPOINT}/invocations",
-            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-            json={"messages": messages, "max_tokens": 10000, "temperature": 0.1},
-            timeout=90,
-        )
-        if not r.ok:
-            print(f"[SUPERVISOR] {r.status_code}: {r.text[:200]}")
-            return None
-        data = r.json()
-        # OpenAI-compatible chat format
-        if "choices" in data:
-            return data["choices"][0]["message"]["content"]
-        # MLflow pyfunc format
-        if "predictions" in data:
-            pred = data["predictions"]
-            if isinstance(pred, list) and pred:
-                p = pred[0]
-                if isinstance(p, str):
-                    return p
-                return p.get("output") or p.get("answer") or p.get("result") or str(p)
-        return None
-    except Exception as e:
-        print(f"[SUPERVISOR] Error: {e}")
-        return None
 
 
 router = APIRouter()

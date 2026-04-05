@@ -437,6 +437,9 @@ if sp_uuid:
     grant(f"GRANT READ VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
     grant(f"GRANT WRITE VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
 
+    # Vector Search index: SP must be able to query the index directly
+    grant(f"GRANT SELECT ON TABLE {CATALOG}.eds_vectors.document_chunks_index TO {sp_ref}")
+
     # Job trigger permission — CAN_MANAGE_RUN allows the SP to call jobs/run-now
     # Required for automatic ingestion after document upload
     for job_id in [INGESTION_JOB_ID]:
