@@ -9,7 +9,7 @@
  */
 
 import { useState, useRef, useEffect } from "react";
-import { Database, ChevronDown, ChevronRight, SendHorizontal, X, Loader2, AlertCircle } from "lucide-react";
+import { Database, SendHorizontal, X, Loader2, AlertCircle } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -106,38 +106,49 @@ function DataTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) 
   );
 }
 
-function SqlBlock({ sql }: { sql: string }) {
-  const [open, setOpen] = useState(false);
-  if (!sql) return null;
+/** Render **bold** and bullet-list markdown in Genie narrative text. */
+function NarrativeText({ text }: { text: string }) {
+  // Split on " - " bullet separators (Genie uses " - item" pattern)
+  const parts = text.split(/\s+-\s+/);
+  const intro = parts[0].trim();
+  const bullets = parts.slice(1);
+
+  function renderInline(str: string) {
+    // Replace **text** with <strong>
+    const segments = str.split(/\*\*(.+?)\*\*/g);
+    return segments.map((seg, i) =>
+      i % 2 === 1 ? <strong key={i} style={{ color: "var(--text-1)", fontWeight: 600 }}>{seg}</strong> : seg
+    );
+  }
+
+  if (bullets.length === 0) {
+    return (
+      <p className="text-[13px] leading-6" style={{ color: "var(--text-2)" }}>
+        {renderInline(intro)}
+      </p>
+    );
+  }
 
   return (
-    <div className="mt-3">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-[11px] font-medium transition-colors"
-        style={{ color: "var(--text-3)" }}
-      >
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        {open ? "Hide" : "▶ View"} generated SQL
-      </button>
-      {open && (
-        <pre
-          className="mt-2 p-3 rounded-xl text-[11px] leading-5 overflow-x-auto"
-          style={{
-            background: "var(--surface-3)",
-            border: "1px solid var(--border)",
-            color: "var(--text-2)",
-            fontFamily: "monospace",
-          }}
-        >
-          {sql}
-        </pre>
+    <div className="space-y-2">
+      {intro && (
+        <p className="text-[13px] leading-6" style={{ color: "var(--text-2)" }}>
+          {renderInline(intro)}
+        </p>
       )}
+      <ul className="space-y-1 pl-1">
+        {bullets.map((b, i) => (
+          <li key={i} className="flex items-start gap-2 text-[13px] leading-6" style={{ color: "var(--text-2)" }}>
+            <span className="mt-2 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--accent)" }} />
+            <span>{renderInline(b.trim())}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-function TurnCard({ turn, index }: { turn: ConversationTurn; index: number }) {
+function TurnCard({ turn }: { turn: ConversationTurn }) {
   return (
     <div className="space-y-3">
       {/* User question */}
@@ -167,17 +178,12 @@ function TurnCard({ turn, index }: { turn: ConversationTurn; index: number }) {
         )}
 
         {/* Narrative */}
-        <p className="text-[13px] leading-6" style={{ color: "var(--text-1)" }}>
-          {turn.response.narrative}
-        </p>
+        <NarrativeText text={turn.response.narrative} />
 
         {/* Data table */}
         {turn.response.columns.length > 0 && (
           <DataTable columns={turn.response.columns} rows={turn.response.rows} />
         )}
-
-        {/* SQL disclosure */}
-        {turn.response.sql && <SqlBlock sql={turn.response.sql} key={`sql-${index}`} />}
       </div>
     </div>
   );
@@ -287,7 +293,7 @@ export default function GenieInsights() {
       {hasConversation && (
         <div className="space-y-6">
           {turns.map((turn, i) => (
-            <TurnCard key={i} turn={turn} index={i} />
+            <TurnCard key={i} turn={turn} />
           ))}
         </div>
       )}
