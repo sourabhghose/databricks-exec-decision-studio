@@ -16,6 +16,12 @@ targets:
 
 
 resources:
+  apps:
+    exec_decision_studio:
+      name: exec-decision-studio
+      description: "Alinta Energy Executive Decision Studio — Agentic AI Strategic Intelligence Platform"
+      source_code_path: ./app
+
   jobs:
     eds_setup_job:
       name: "[EDS] 00 - Setup & Synthetic Data"
@@ -149,3 +155,37 @@ resources:
             - task_key: rag_chain_setup
           run_job_task:
             job_id: ${resources.jobs.eds_agents_job.id}
+
+    # Runs after `databricks bundle deploy` so the app SP already exists.
+    # Grants every UC, warehouse, and job permission the app needs.
+    eds_grant_permissions_job:
+      name: "[EDS] 05 - Grant App Permissions"
+      tasks:
+        - task_key: grant_permissions
+          notebook_task:
+            notebook_path: notebooks/00_setup/05_grant_app_permissions.py
+            source: WORKSPACE
+            base_parameters:
+              warehouse_id: "33baaa9523773520"
+              ingestion_job_id: ${resources.jobs.eds_ingestion_job.id}
+          environment_key: eds_env
+      environments:
+        - environment_key: eds_env
+          spec:
+            client: "1"
+            dependencies:
+              - requests
+
+    # One-command fresh install: schema setup → SP grants.
+    # Usage: databricks bundle deploy && databricks bundle run eds_full_install_job
+    eds_full_install_job:
+      name: "[EDS] 00 - Full Install"
+      tasks:
+        - task_key: setup_and_data
+          run_job_task:
+            job_id: ${resources.jobs.eds_setup_job.id}
+        - task_key: grant_app_permissions
+          depends_on:
+            - task_key: setup_and_data
+          run_job_task:
+            job_id: ${resources.jobs.eds_grant_permissions_job.id}
