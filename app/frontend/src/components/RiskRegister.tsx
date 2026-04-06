@@ -258,7 +258,16 @@ export default function RiskRegister() {
                                   <Sparkles size={11} className="text-amber-400" />
                                   <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">AI Risk Analysis</span>
                                 </div>
-                                <p dangerouslySetInnerHTML={{ __html: aiAnalysis[risk.risk_id].replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>') }} />
+                                <div className="space-y-1.5">
+                                  {aiAnalysis[risk.risk_id]
+                                    .split(/\n+/)
+                                    .map(s => s.trim())
+                                    .filter(Boolean)
+                                    .map((line, i) => (
+                                      <p key={i} dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>') }} />
+                                    ))
+                                  }
+                                </div>
                               </div>
                             ) : (
                               <button
