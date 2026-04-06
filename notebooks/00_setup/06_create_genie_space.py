@@ -3,17 +3,19 @@
 # MAGIC %md
 # MAGIC # [EDS] 06 — Create Genie Space
 # MAGIC
-# MAGIC Creates (or finds) an AI/BI Genie Space over the five core EDS Unity Catalog tables,
-# MAGIC adds 10 curated sample questions, then patches `app/app.yaml` in the workspace with:
-# MAGIC - `genie_space` resource block (so Databricks Apps grants the SP `CAN_RUN`)
-# MAGIC - `GENIE_SPACE_ID` env var (`valueFrom: genie_space`)
+# MAGIC Fully automated, idempotent setup for the Data Insights tab:
 # MAGIC
-# MAGIC **Idempotent:** re-running does not create a duplicate space.
+# MAGIC 1. Create (or find) the AI/BI Genie Space over 5 EDS Unity Catalog tables
+# MAGIC 2. Add 10 curated sample questions
+# MAGIC 3. Discover the app service principal from the Databricks Apps API
+# MAGIC 4. Grant the SP `CAN_RUN` on the Genie Space
+# MAGIC 5. Update `app/app.yaml` in the workspace — sets `GENIE_SPACE_ID` as a plain `value`
+# MAGIC
+# MAGIC **Idempotent:** re-running does not create duplicate spaces or duplicate questions.
 # MAGIC After this notebook completes, re-run `./scripts/deploy.sh` to activate.
 
 # COMMAND ----------
 
-import json
 import base64
 import time
 
@@ -25,11 +27,13 @@ import requests
 # COMMAND ----------
 
 dbutils.widgets.text("warehouse_id", "33baaa9523773520", "SQL Warehouse ID")
+dbutils.widgets.text("app_name", "exec-decision-studio", "Databricks App name")
 
 WAREHOUSE_ID = dbutils.widgets.get("warehouse_id")
+APP_NAME     = dbutils.widgets.get("app_name")
 
-CATALOG = "ausnet_process_intel_catalog"
-SPACE_NAME = "EDS — Executive Data Explorer"
+CATALOG      = "ausnet_process_intel_catalog"
+SPACE_NAME   = "EDS — Executive Data Explorer"
 WORKSPACE_PATH = "/Workspace/Users/sourabh.ghose@databricks.com/eds-app/app/app.yaml"
 
 TABLES = [
@@ -58,31 +62,26 @@ SAMPLE_QUESTIONS = [
 
 # COMMAND ----------
 
-def _get_token() -> str:
+def _tok() -> str:
     return dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
 
-
-def _get_workspace_url() -> str:
+def _url() -> str:
     return dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().get()
 
-
-def _headers(tok: str) -> dict:
+def _h(tok: str) -> dict:
     return {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
 
-
 # COMMAND ----------
-# MAGIC %md ## Genie Space helpers
+# MAGIC %md ## 1 — Create or find Genie Space
 
 # COMMAND ----------
 
 def find_existing_space(tok: str, url: str) -> str | None:
-    """Return space_id if a space named SPACE_NAME already exists, else None."""
-    resp = requests.get(f"{url}/api/2.0/data-rooms", headers=_headers(tok), timeout=30)
+    resp = requests.get(f"{url}/api/2.0/data-rooms", headers=_h(tok), timeout=30)
     if not resp.ok:
-        print(f"[EDS] Could not list data-rooms: {resp.status_code} {resp.text[:200]}")
+        print(f"[EDS] Could not list Genie spaces: {resp.status_code} {resp.text[:200]}")
         return None
-    rooms = resp.json().get("data_rooms", [])
-    for room in rooms:
+    for room in resp.json().get("data_rooms", []):
         if room.get("display_name") == SPACE_NAME:
             sid = room.get("space_id") or room.get("id")
             print(f"[EDS] Found existing Genie Space: {sid}")
@@ -91,7 +90,6 @@ def find_existing_space(tok: str, url: str) -> str | None:
 
 
 def create_space(tok: str, url: str) -> str:
-    """Create a new Genie Space and return its space_id."""
     payload = {
         "display_name": SPACE_NAME,
         "warehouse_id": WAREHOUSE_ID,
@@ -103,72 +101,110 @@ def create_space(tok: str, url: str) -> str:
             "action items, and the decision register."
         ),
     }
-    resp = requests.post(
-        f"{url}/api/2.0/data-rooms/",
-        headers=_headers(tok),
-        json=payload,
-        timeout=60,
-    )
+    resp = requests.post(f"{url}/api/2.0/data-rooms/", headers=_h(tok), json=payload, timeout=60)
     if not resp.ok:
         raise RuntimeError(f"Failed to create Genie Space: {resp.status_code} {resp.text[:500]}")
-    data = resp.json()
-    sid = data.get("space_id") or data.get("id")
+    sid = resp.json().get("space_id") or resp.json().get("id")
     print(f"[EDS] Created Genie Space: {sid}")
     return sid
 
 
 def add_curated_questions(tok: str, url: str, space_id: str) -> None:
-    """Add sample questions to the Genie Space."""
+    # Fetch existing questions to stay idempotent
+    existing_resp = requests.get(
+        f"{url}/api/2.0/data-rooms/{space_id}/curated-questions",
+        headers=_h(tok), timeout=30,
+    )
+    existing = set()
+    if existing_resp.ok:
+        for q in existing_resp.json().get("curated_questions", []):
+            existing.add(q.get("question", ""))
+
+    added = 0
     for question in SAMPLE_QUESTIONS:
-        payload = {"question": question}
+        if question in existing:
+            print(f"[EDS]   ✓ already exists: {question[:60]}")
+            continue
         resp = requests.post(
             f"{url}/api/2.0/data-rooms/{space_id}/curated-questions",
-            headers=_headers(tok),
-            json=payload,
-            timeout=30,
+            headers=_h(tok), json={"question": question}, timeout=30,
         )
         if resp.ok:
-            print(f"[EDS]   + question: {question[:60]}...")
+            print(f"[EDS]   + added: {question[:60]}")
+            added += 1
         else:
             print(f"[EDS]   ! failed ({resp.status_code}): {question[:60]}")
+    print(f"[EDS] Questions: {added} added, {len(existing)} already present")
 
 
 def create_or_find_space(tok: str, url: str) -> str:
-    """Idempotent: return existing space_id or create a new one."""
     existing = find_existing_space(tok, url)
     if existing:
+        add_curated_questions(tok, url, existing)
         return existing
     sid = create_space(tok, url)
-    print("[EDS] Adding curated questions...")
     add_curated_questions(tok, url, sid)
     return sid
 
+# COMMAND ----------
+# MAGIC %md ## 2 — Discover app service principal
 
 # COMMAND ----------
-# MAGIC %md ## app.yaml patch helpers
+
+def get_app_sp_name(tok: str, url: str) -> str | None:
+    """Return the service_principal_name (client_id UUID) of the Databricks App SP."""
+    resp = requests.get(f"{url}/api/2.0/apps/{APP_NAME}", headers=_h(tok), timeout=30)
+    if not resp.ok:
+        print(f"[EDS] Could not fetch app details: {resp.status_code} {resp.text[:200]}")
+        return None
+    sp_name = resp.json().get("service_principal_name")
+    print(f"[EDS] App SP name: {sp_name}")
+    return sp_name
+
+# COMMAND ----------
+# MAGIC %md ## 3 — Grant SP CAN_RUN on Genie Space
+
+# COMMAND ----------
+
+def grant_sp_can_run(tok: str, url: str, space_id: str, sp_name: str) -> None:
+    """Grant the app SP CAN_RUN on the Genie Space (idempotent — PUT replaces ACL)."""
+    payload = {
+        "access_control_list": [
+            {"service_principal_name": sp_name, "permission_level": "CAN_RUN"}
+        ]
+    }
+    resp = requests.put(
+        f"{url}/api/2.0/permissions/genie/{space_id}",
+        headers=_h(tok), json=payload, timeout=30,
+    )
+    if resp.ok:
+        print(f"[EDS] Granted CAN_RUN to SP '{sp_name}' on Genie Space {space_id}")
+    else:
+        print(f"[EDS] WARNING: Could not grant permission: {resp.status_code} {resp.text[:300]}")
+        print("[EDS] Grant manually: PUT /api/2.0/permissions/genie/{space_id}")
+
+# COMMAND ----------
+# MAGIC %md ## 4 — Patch app.yaml with GENIE_SPACE_ID
 
 # COMMAND ----------
 
 def _read_workspace_file(tok: str, url: str, path: str) -> str:
-    """Read a file from the Databricks workspace and return its content as a string."""
     resp = requests.get(
         f"{url}/api/2.0/workspace/export",
-        headers=_headers(tok),
+        headers=_h(tok),
         params={"path": path, "format": "SOURCE"},
         timeout=30,
     )
     if not resp.ok:
         raise RuntimeError(f"Could not read {path}: {resp.status_code} {resp.text[:300]}")
-    encoded = resp.json().get("content", "")
-    return base64.b64decode(encoded).decode("utf-8")
+    return base64.b64decode(resp.json().get("content", "")).decode("utf-8")
 
 
 def _write_workspace_file(tok: str, url: str, path: str, content: str) -> None:
-    """Write (overwrite) a file in the Databricks workspace."""
     encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
     resp = requests.post(
         f"{url}/api/2.0/workspace/import",
-        headers=_headers(tok),
+        headers=_h(tok),
         json={"path": path, "content": encoded, "overwrite": True, "format": "AUTO"},
         timeout=30,
     )
@@ -179,124 +215,77 @@ def _write_workspace_file(tok: str, url: str, path: str, content: str) -> None:
 
 def patch_app_yaml(tok: str, url: str, space_id: str) -> None:
     """
-    Insert or update the genie_space resource and GENIE_SPACE_ID env var
-    in the app.yaml stored in the workspace.
-
-    Operates as line-level text manipulation to preserve all existing content.
+    Ensure app.yaml contains exactly one GENIE_SPACE_ID env var with the correct value.
+    Strategy: read → remove all existing GENIE_SPACE_ID lines → append clean entry.
+    This avoids brittle YAML parsing and handles both first-run and re-run.
     """
     try:
         content = _read_workspace_file(tok, url, WORKSPACE_PATH)
     except RuntimeError as e:
         print(f"[EDS] WARNING: {e}")
-        print("[EDS] Skipping app.yaml patch — re-run deploy.sh manually and add genie_space resource via UI.")
+        print("[EDS] Skipping app.yaml patch — set GENIE_SPACE_ID manually in app.yaml env section.")
         return
 
-    lines = content.splitlines(keepends=True)
+    lines = content.splitlines()
 
-    # ── Check if genie_space block already exists ──────────────────────────────
-    if "genie_space:" in content:
-        # Update space_id in existing block
-        new_lines = []
-        in_genie = False
-        for line in lines:
-            if "genie_space:" in line:
-                in_genie = True
-            if in_genie and "space_id:" in line:
-                indent = len(line) - len(line.lstrip())
-                line = " " * indent + f"space_id: \"{space_id}\"\n"
-                in_genie = False
-            new_lines.append(line)
-        content = "".join(new_lines)
-        print(f"[EDS] Updated existing genie_space.space_id → {space_id}")
-    else:
-        # Append genie_space resource block under existing resources section
-        genie_resource_block = (
-            f"  - name: genie_space\n"
-            f"    genie_space:\n"
-            f"      space_id: \"{space_id}\"\n"
-            f"      permission: CAN_RUN\n"
-        )
-        genie_env_block = (
-            f"  - name: GENIE_SPACE_ID\n"
-            f"    valueFrom: genie_space\n"
-        )
+    # Remove any existing GENIE_SPACE_ID block (name + value/valueFrom lines)
+    cleaned = []
+    skip_next = False
+    for line in lines:
+        if skip_next:
+            # Skip the value/valueFrom line that follows the name: GENIE_SPACE_ID line
+            if line.strip().startswith("value"):
+                skip_next = False
+                continue
+            skip_next = False
+        if "GENIE_SPACE_ID" in line and line.strip().startswith("- name:"):
+            skip_next = True   # skip this line and the next value line
+            continue
+        if "GENIE_SPACE_ID" in line:
+            continue           # stray GENIE_SPACE_ID line (e.g. orphan valueFrom)
+        cleaned.append(line)
 
-        # Insert after last existing resource entry (before first blank line after resources)
-        # Simple approach: append to end, then restructure
-        # Find the resources: section and append our block
-        if "resources:" in content:
-            # Find the end of the resources section (first top-level key after it)
-            new_lines = []
-            in_resources = False
-            resources_done = False
-            in_env = False
-            env_done = False
+    # Remove any duplicate blank lines at end
+    content = "\n".join(cleaned).rstrip()
 
-            for i, line in enumerate(lines):
-                stripped = line.strip()
+    # Ensure there is an env: section; if not, append one
+    if "env:" not in content:
+        content += "\n\nenv:"
 
-                # Detect top-level keys (not indented)
-                is_top_level = line and not line[0].isspace() and stripped and not stripped.startswith("#")
-
-                if line.rstrip() == "resources:":
-                    in_resources = True
-                    in_env = False
-                elif line.rstrip() == "env:":
-                    in_env = True
-                    in_resources = False
-                elif is_top_level and stripped.endswith(":") and in_resources and not resources_done:
-                    # New top-level section — insert genie resource before it
-                    new_lines.append(genie_resource_block)
-                    resources_done = True
-                    in_resources = False
-                elif is_top_level and stripped.endswith(":") and in_env and not env_done:
-                    new_lines.append(genie_env_block)
-                    env_done = True
-                    in_env = False
-
-                new_lines.append(line)
-
-            # If still inside resources or env at EOF
-            if in_resources and not resources_done:
-                new_lines.append(genie_resource_block)
-            if in_env and not env_done:
-                new_lines.append(genie_env_block)
-
-            # If env section wasn't found at all, append it
-            if not env_done:
-                new_lines.append("\nenv:\n")
-                new_lines.append(genie_env_block)
-
-            content = "".join(new_lines)
-        else:
-            # No resources section at all — append both
-            content += (
-                f"\nresources:\n{genie_resource_block}"
-                f"\nenv:\n{genie_env_block}"
-            )
-
-        print(f"[EDS] Added genie_space resource block (space_id={space_id})")
+    # Append GENIE_SPACE_ID as the last env entry
+    content += f"\n  - name: GENIE_SPACE_ID\n    value: \"{space_id}\"\n"
 
     _write_workspace_file(tok, url, WORKSPACE_PATH, content)
-
+    print(f"[EDS] GENIE_SPACE_ID set to {space_id} in app.yaml")
 
 # COMMAND ----------
 # MAGIC %md ## Main
 
 # COMMAND ----------
 
-tok = _get_token()
-url = _get_workspace_url()
+tok = _tok()
+url = _url()
 
 print(f"[EDS] Workspace: {url}")
 print(f"[EDS] Warehouse: {WAREHOUSE_ID}")
-print(f"[EDS] Tables: {len(TABLES)}")
+print(f"[EDS] App:       {APP_NAME}")
+print()
 
+# Step 1: Create or find Genie Space
 space_id = create_or_find_space(tok, url)
 print(f"\n[EDS] Genie Space ID: {space_id}")
 
+# Step 2: Discover app SP
+sp_name = get_app_sp_name(tok, url)
+
+# Step 3: Grant CAN_RUN
+if sp_name:
+    grant_sp_can_run(tok, url, space_id, sp_name)
+else:
+    print("[EDS] WARNING: Could not discover app SP — grant CAN_RUN manually.")
+
+# Step 4: Patch app.yaml
 patch_app_yaml(tok, url, space_id)
 
 print("\n[EDS] ✅ Done.")
-print(f"[EDS] Next step: run ./scripts/deploy.sh to activate the Genie integration.")
-print(f"[EDS] The app will read GENIE_SPACE_ID from the Databricks Apps resource injection.")
+print("[EDS] Next step: run ./scripts/deploy.sh to activate the Data Insights tab.")

@@ -189,6 +189,7 @@ resources:
             source: WORKSPACE
             base_parameters:
               warehouse_id: "33baaa9523773520"
+              app_name: "exec-decision-studio"
           environment_key: eds_env
       environments:
         - environment_key: eds_env
