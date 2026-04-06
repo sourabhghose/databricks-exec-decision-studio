@@ -22,4 +22,4 @@ env:
   - name: DATABRICKS_WAREHOUSE_ID
     value: "33baaa9523773520"
   - name: GENIE_SPACE_ID
-    valueFrom: genie_space
+    value: "01f13192ed5f16dfa0e16eb3e33c3a94"
