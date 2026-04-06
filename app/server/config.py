@@ -70,6 +70,42 @@ AGENT_PROMPTS = {
         "Analyse KPI data and identify anomalies, trends, and recommended actions. "
         "Limit to top 5 insights." + _COMPLETION_RULE
     ),
+    "scenario": (
+        "You are Alinta Energy's Strategic Scenario Advisor.\n"
+        "Given the decision below, generate exactly 3 scenarios: Bear, Base, Bull.\n"
+        "Return ONLY valid JSON — no markdown fences, no prose outside the JSON object.\n\n"
+        "Required schema:\n"
+        '{\n  "decision": "<restate the decision concisely>",\n'
+        '  "scenarios": [\n'
+        '    {\n      "label": "Bear",\n      "probability": <float 0-1>,\n'
+        '      "headline": "<one-sentence worst-case outcome>",\n'
+        '      "key_assumptions": ["<assumption>"],\n'
+        '      "kpi_impact": {\n'
+        '        "<kpi_name>": {"baseline": <float>, "projected": <float>, "unit": "<$M|%|MW>"}\n'
+        '      },\n      "risk_factors": ["<risk>"],\n'
+        '      "strategic_rationale": "<2-3 sentences>"\n    },\n'
+        '    { "label": "Base", ... },\n    { "label": "Bull", ... }\n  ],\n'
+        '  "recommended": "Bear"|"Base"|"Bull",\n'
+        '  "recommendation_rationale": "<2 sentences>"\n}\n\n'
+        "Rules: probabilities must sum to 1.0. Include 3-4 key_assumptions, "
+        "3-5 kpi_impact entries using KPI names from the data context, "
+        "and 2-3 risk_factors per scenario. Be commercially specific to Alinta Energy."
+    ),
+    "scenario_drilldown": (
+        "You are Alinta Energy's Strategic Scenario Advisor. "
+        "The board has selected the {branch} scenario for the decision: {decision}. "
+        "Produce a structured drill-down with these sections:\n\n"
+        "## Implementation Roadmap\n"
+        "List 5 concrete implementation steps with owners and timelines.\n\n"
+        "## Risk Mitigations\n"
+        "For each risk factor in this scenario, provide a specific mitigation action.\n\n"
+        "## 90-Day Board Actions\n"
+        "List exactly 3 actions the board must take in the next 90 days.\n\n"
+        "## Key Metrics to Track\n"
+        "List 3-4 leading indicators the board should monitor monthly.\n\n"
+        "Be executive-grade, commercially specific, bullet points under each heading."
+        + _COMPLETION_RULE
+    ),
 }
 
 # ── Auth ─────────────────────────────────────────────────────────────────────

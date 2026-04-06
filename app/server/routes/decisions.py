@@ -2,6 +2,8 @@
 
 import requests
 from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Optional
 from server.config import CATALOG, get_token, get_warehouse_id, get_workspace_url
 
 router = APIRouter()
@@ -46,6 +48,40 @@ def _run_sql(sql: str) -> list:
     except Exception as e:
         print(f"[SQL decisions] {e}")
         return []
+
+
+class DecisionSave(BaseModel):
+    decision_id: str
+    decision_date: str
+    committee: str = "Board"
+    description: str
+    decision_type: str = "strategic"
+    outcome: str = ""
+    owner: str = "CEO"
+    implementation_status: str = "pending"
+
+
+@router.post("/api/decisions/save")
+async def save_decision(req: DecisionSave):
+    """Persist a scenario simulation outcome to the decision register."""
+    tok = get_token()
+    wh = get_warehouse_id()
+    url = get_workspace_url()
+    if not tok or not wh:
+        return {"ok": False, "demo": True}
+
+    desc = req.description.replace("'", "\\'")
+    outcome = req.outcome.replace("'", "\\'")
+    sql = (
+        f"INSERT INTO {CATALOG}.eds_actions.decision_register "
+        f"(decision_id, decision_date, committee, description, decision_type, "
+        f"outcome, owner, implementation_status) VALUES ("
+        f"'{req.decision_id}', '{req.decision_date}', '{req.committee}', "
+        f"'{desc}', '{req.decision_type}', '{outcome}', '{req.owner}', "
+        f"'{req.implementation_status}')"
+    )
+    rows = _run_sql(sql)
+    return {"ok": True, "decision_id": req.decision_id}
 
 
 @router.get("/api/decisions")
