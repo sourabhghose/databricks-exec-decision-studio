@@ -444,25 +444,7 @@ function GenieSearchBar({ onAsk }: { onAsk?: (q: string) => void }) {
         className="w-full bg-transparent outline-none text-[13px] mb-2.5"
         style={{ color: "var(--text-1)" }}
       />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={submit}
-            disabled={!value.trim() || !onAsk}
-            className="px-3.5 py-1 rounded-full text-[12px] font-semibold transition-all disabled:opacity-40"
-            style={{ background: "var(--surface-3)", border: "1px solid var(--border-strong)", color: "var(--text-1)" }}
-          >
-            Search
-          </button>
-          <button
-            onClick={submit}
-            disabled={!value.trim() || !onAsk}
-            className="text-[12px] font-medium transition-all disabled:opacity-40"
-            style={{ color: "var(--text-3)" }}
-          >
-            Ask
-          </button>
-        </div>
+      <div className="flex justify-end">
         <button
           onClick={submit}
           disabled={!value.trim() || !onAsk}
