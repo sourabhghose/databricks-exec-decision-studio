@@ -352,8 +352,14 @@ print(f"\nAll tables and volumes created successfully under catalog: {CATALOG}")
 
 # MAGIC %md
 # MAGIC ## Grant App Service Principal Access to Unity Catalog
+# MAGIC
+# MAGIC **NOTE — Fresh install ordering:**
+# MAGIC The Databricks App service principal only exists after the app has been deployed
+# MAGIC at least once.  If the grants below are skipped (app not found), run
+# MAGIC `notebooks/00_setup/05_grant_app_permissions` after the first deploy.
+# MAGIC
 # MAGIC Dynamically discovers the EDS Databricks App's service principal and grants
-# MAGIC it the required Unity Catalog permissions. Safe to re-run — uses IF EXISTS patterns.
+# MAGIC it the required Unity Catalog permissions. Safe to re-run — grants are idempotent.
 
 # COMMAND ----------
 
@@ -437,6 +443,28 @@ if sp_uuid:
     grant(f"GRANT READ VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
     grant(f"GRANT WRITE VOLUME ON VOLUME {CATALOG}.eds_raw.documents TO {sp_ref}")
 
+    # Vector Search index: SP must be able to query the index directly
+    grant(f"GRANT SELECT ON TABLE {CATALOG}.eds_vectors.document_chunks_index TO {sp_ref}")
+
+    # SQL Warehouse: SP needs CAN_USE to run SQL statements
+    WAREHOUSE_ID = "33baaa9523773520"
+    try:
+        rw = requests.patch(
+            f"{host}/api/2.0/permissions/sql/warehouses/{WAREHOUSE_ID}",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"access_control_list": [{"user_name": sp_uuid, "permission_level": "CAN_USE"}]},
+            timeout=15,
+        )
+        if rw.ok:
+            granted += 1
+            print(f"  [OK] CAN_USE on warehouse {WAREHOUSE_ID}")
+        else:
+            failed += 1
+            print(f"  [WARN] Warehouse permission: {rw.status_code} {rw.text[:100]}")
+    except Exception as ex:
+        failed += 1
+        print(f"  [WARN] Warehouse permission: {ex}")
+
     # Job trigger permission — CAN_MANAGE_RUN allows the SP to call jobs/run-now
     # Required for automatic ingestion after document upload
     for job_id in [INGESTION_JOB_ID]:
@@ -459,4 +487,26 @@ if sp_uuid:
 
     print(f"\n[OK] SP grants complete: {granted} succeeded, {failed} failed")
 else:
-    print("[INFO] No SP grants applied (app not found or SP not discovered)")
+    print()
+    print("=" * 60)
+    print("  ACTION REQUIRED — SP GRANTS SKIPPED")
+    print("=" * 60)
+    print()
+    print("  The Databricks App 'exec-decision-studio' does not exist")
+    print("  yet, so its service principal cannot be granted permissions.")
+    print()
+    print("  Fresh-install sequence:")
+    print("  1. Run this notebook  (done)")
+    print("  2. Deploy the app:")
+    print("     databricks apps deploy exec-decision-studio \\")
+    print("       --source-code-path /Workspace/Users/<you>/eds-app \\")
+    print("       -p fe-vm-ausnet-process-intel")
+    print("  3. Upload app.yaml (sync does NOT update it):")
+    print("     databricks workspace import /Workspace/Users/<you>/eds-app/app.yaml \\")
+    print("       --file app/app.yaml --format AUTO --overwrite \\")
+    print("       -p fe-vm-ausnet-process-intel")
+    print("  4. Re-run notebooks/00_setup/05_grant_app_permissions  ← grants SP access")
+    print()
+    print("  Until step 4 is done the app will return 403 errors on")
+    print("  Vector Search, SQL Warehouse, and catalog queries.")
+    print("=" * 60)
