@@ -33,14 +33,22 @@ interface ConversationTurn {
 const QUICK_QUESTIONS = [
   "Which KPIs are below target?",
   "Top 5 risks by score",
+  "Show Critical and High risks",
   "Overdue action items",
-  "Decisions in progress",
+  "Decisions currently in progress",
   "EBITDA by business unit",
-  "Critical and High risks",
-  "KPI anomalies",
+  "KPIs flagged as anomalies",
   "Board decisions last 6 months",
-  "Risks by owner",
+  "Risks owned by the CRO",
   "Retail churn rate trend",
+  "Financial performance vs budget",
+  "Highest likelihood risks",
+  "Actions due this month",
+  "KPI performance in Generation",
+  "Risk mitigation actions pending",
+  "Revenue by business unit FY2025",
+  "Which decisions are completed?",
+  "Show all strategic risks",
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -263,31 +271,29 @@ export default function GenieInsights() {
         </p>
       </div>
 
-      {/* Quick question chips */}
-      {!hasConversation && (
-        <div>
-          <p className="text-[11px] font-semibold mb-2 uppercase tracking-wider" style={{ color: "var(--text-3)" }}>
-            Quick questions
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {QUICK_QUESTIONS.map((q) => (
-              <button
-                key={q}
-                onClick={() => submitQuestion(q)}
-                disabled={loading}
-                className="px-3 py-1.5 rounded-full text-[12px] font-medium transition-all"
-                style={{
-                  background: "var(--surface-2)",
-                  border: "1px solid var(--border)",
-                  color: "var(--text-2)",
-                }}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
+      {/* Quick question chips — always visible */}
+      <div>
+        <p className="text-[11px] font-semibold mb-2 uppercase tracking-wider" style={{ color: "var(--text-3)" }}>
+          Quick questions
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {QUICK_QUESTIONS.map((q) => (
+            <button
+              key={q}
+              onClick={() => submitQuestion(q)}
+              disabled={loading}
+              className="px-3 py-1.5 rounded-full text-[12px] font-medium transition-all disabled:opacity-40"
+              style={{
+                background: "var(--surface-2)",
+                border: "1px solid var(--border)",
+                color: "var(--text-2)",
+              }}
+            >
+              {q}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       {/* Conversation turns */}
       {hasConversation && (
