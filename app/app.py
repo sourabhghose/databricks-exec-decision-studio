@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from server.routes import chat, kpi, audit, actions, risks, decisions, documents, briefing, overview, market, export, upload, vector_search
+from server.routes import chat, kpi, audit, actions, risks, decisions, documents, briefing, overview, market, export, upload, vector_search, simulate
 
 print(f"[EDS] Python {sys.version.split()[0]} | FastAPI backend")
 
@@ -35,6 +35,7 @@ app.include_router(market.router)
 app.include_router(export.router)
 app.include_router(upload.router)
 app.include_router(vector_search.router)
+app.include_router(simulate.router)
 
 
 # ── Health check ─────────────────────────────────────────────────────────────

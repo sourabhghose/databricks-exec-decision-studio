@@ -14,6 +14,7 @@ import {
   Moon,
   User,
   Globe,
+  GitBranch,
 } from "lucide-react";
 import Overview from "./components/Overview";
 import Chat from "./components/Chat";
@@ -26,6 +27,7 @@ import DecisionRegister from "./components/DecisionRegister";
 import DocumentLibrary from "./components/DocumentLibrary";
 import Briefing from "./components/Briefing";
 import MarketIntelligence from "./components/MarketIntelligence";
+import ScenarioSimulator from "./components/ScenarioSimulator";
 
 type Tab =
   | "overview"
@@ -38,6 +40,7 @@ type Tab =
   | "documents"
   | "briefing"
   | "market"
+  | "simulate"
   | "about";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -49,9 +52,10 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "actions",    label: "Action Items",    icon: <ClipboardList size={14} /> },
   { id: "documents",  label: "Document Library",icon: <Library size={14} /> },
   { id: "briefing",   label: "AI Briefing",     icon: <Sparkles size={14} /> },
-  { id: "market",     label: "Market Intel",    icon: <Globe size={14} /> },
-  { id: "audit",      label: "Audit Log",       icon: <Shield size={14} /> },
-  { id: "about",      label: "About",           icon: <Info size={14} /> },
+  { id: "market",     label: "Market Intel",      icon: <Globe size={14} /> },
+  { id: "simulate",   label: "Scenario Sim",      icon: <GitBranch size={14} /> },
+  { id: "audit",      label: "Audit Log",         icon: <Shield size={14} /> },
+  { id: "about",      label: "About",             icon: <Info size={14} /> },
 ];
 
 /* ── Alinta Energy logo ──────────────────────────────────────────────────── */
@@ -208,6 +212,7 @@ export default function App() {
           {activeTab === "documents"  && <DocumentLibrary />}
           {activeTab === "briefing"   && <Briefing />}
           {activeTab === "market"     && <MarketIntelligence />}
+          {activeTab === "simulate"   && <ScenarioSimulator />}
           {activeTab === "audit"      && <AuditLog />}
           {activeTab === "about"      && <About />}
         </div>
