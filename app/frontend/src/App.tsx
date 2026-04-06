@@ -17,6 +17,7 @@ import {
   GitBranch,
   ChevronDown,
   Bot,
+  Database,
 } from "lucide-react";
 import Overview from "./components/Overview";
 import Chat from "./components/Chat";
@@ -30,6 +31,7 @@ import DocumentLibrary from "./components/DocumentLibrary";
 import Briefing from "./components/Briefing";
 import MarketIntelligence from "./components/MarketIntelligence";
 import ScenarioSimulator from "./components/ScenarioSimulator";
+import GenieInsights from "./components/GenieInsights";
 
 type Tab =
   | "overview"
@@ -43,12 +45,14 @@ type Tab =
   | "briefing"
   | "market"
   | "simulate"
+  | "genie"
   | "about";
 
 const AI_ASSISTANT_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "chat",     label: "Strategic Chat", icon: <MessageSquareText size={13} /> },
   { id: "briefing", label: "AI Briefing",    icon: <Sparkles size={13} /> },
   { id: "simulate", label: "Simulation",     icon: <GitBranch size={13} /> },
+  { id: "genie",    label: "Data Insights",  icon: <Database size={13} /> },
 ];
 
 const MAIN_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -64,7 +68,7 @@ const MAIN_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "about",      label: "About",           icon: <Info size={14} /> },
 ];
 
-const AI_ASSISTANT_IDS = new Set<Tab>(["chat", "briefing", "simulate"]);
+const AI_ASSISTANT_IDS = new Set<Tab>(["chat", "briefing", "simulate", "genie"]);
 
 /* ── Alinta Energy logo ──────────────────────────────────────────────────── */
 function AlintaIcon({ size = 36 }: { size?: number }) {
@@ -320,6 +324,7 @@ export default function App() {
           {activeTab === "briefing"   && <Briefing />}
           {activeTab === "market"     && <MarketIntelligence />}
           {activeTab === "simulate"   && <ScenarioSimulator />}
+          {activeTab === "genie"      && <GenieInsights />}
           {activeTab === "audit"      && <AuditLog />}
           {activeTab === "about"      && <About />}
         </div>

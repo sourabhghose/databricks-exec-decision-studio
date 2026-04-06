@@ -91,6 +91,7 @@ Overview  |  AI Assistant ▾  |  Market Intel  |  KPI Dashboard  |  Risk Regist
 | AI Assistant → Strategic Chat | `Chat.tsx` | `POST /api/chat/stream` (SSE streaming RAG) |
 | AI Assistant → AI Briefing | `Briefing.tsx` | `POST /api/briefing/stream` (SSE) |
 | AI Assistant → Simulation | `ScenarioSimulator.tsx` | `POST /api/simulate/stream` (SSE) |
+| AI Assistant → Data Insights | `GenieInsights.tsx` | `POST /api/genie/query` |
 | Market Intel | `MarketIntelligence.tsx` | `GET /api/market/news`, `/stocks`, `/carbon` |
 | KPI Dashboard | `KPIDashboard.tsx` | `GET /api/kpi` |
 | Risk Register | `RiskRegister.tsx` | `GET /api/risks` |
@@ -101,7 +102,7 @@ Overview  |  AI Assistant ▾  |  Market Intel  |  KPI Dashboard  |  Risk Regist
 | About | `About.tsx` | — |
 
 ### Key frontend features
-- **AI Assistant dropdown** — Bot icon tab with three sub-items (Strategic Chat, AI Briefing, Simulation); shows active sub-tab name inline; closes on outside click
+- **AI Assistant dropdown** — Bot icon tab with four sub-items (Strategic Chat, AI Briefing, Simulation, Data Insights); shows active sub-tab name inline; closes on outside click
 - **Scenario Simulator** — Bear/Base/Bull decision simulation grounded in live Alinta KPI/financial/risk data; 15 Alinta-specific quick-start templates; SSE streaming with `result` event pattern for reliable JSON delivery; drill-down narrative per scenario; save to Decision Register
 - **Executive Overview drill-down** — every metric clickable: hero stat cards, KPI performance cards, risk/action charts; right-side drawer with AI analysis panel
 - **Inline chat charts** — Recharts `BarChart`/`LineChart` inside assistant messages via SSE `{"type":"chart"}` event
@@ -136,6 +137,7 @@ Overview  |  AI Assistant ▾  |  Market Intel  |  KPI Dashboard  |  Risk Regist
 | `/api/simulate/templates` | GET | 15 pre-built Alinta scenario templates |
 | `/api/simulate/stream` | POST | SSE Bear/Base/Bull scenario simulation + drill-down |
 | `/api/export/pptx` | POST | Export chat response as branded PPTX |
+| `/api/genie/query` | POST | AI/BI Genie natural-language data query |
 | `/api/health` | GET | Health check with JS bundle info |
 
 ### Live data status
@@ -183,10 +185,23 @@ Overview  |  AI Assistant ▾  |  Market Intel  |  KPI Dashboard  |  Risk Regist
 
 ---
 
+## Recent Changes (Session 7 — 2026-04-06)
+
+| Change | Detail |
+|--------|--------|
+| **Data Insights tab (Genie)** | New AI Assistant sub-tab powered by Databricks AI/BI Genie; natural-language queries over 5 EDS Unity Catalog tables; multi-turn conversation; narrative + data table + SQL disclosure |
+| **Genie automation notebook** | `notebooks/00_setup/06_create_genie_space.py` — idempotent space creation via `POST /api/2.0/data-rooms/`, 10 curated questions, patches `app/app.yaml` with `genie_space` resource and `GENIE_SPACE_ID` env var |
+| **`/api/genie/query` route** | `app/server/routes/genie.py` — wraps Genie Conversation API with 60s polling; 5-category demo fallback so tab always works without Genie Space configured |
+| **`eds_genie_job` DAB job** | Added to `databricks.yml`; also wired as 3rd task in `eds_full_install_job` (runs after SP grants) |
+| **Demo fallback** | 5 keyword-matched demo responses (KPI, risk, financial, actions, decisions) — realistic live-looking data |
+
+---
+
 ## Pending / Blocked
 
 | Item | Status | Notes |
 |------|--------|-------|
+| Genie Space activation | **Pending deploy** | Run `databricks bundle run eds_genie_job` then `./scripts/deploy.sh` to wire up live Genie |
 | Rename catalog to `eds` | **BLOCKED** | Requires metastore/account admin — current user lacks `CREATE CATALOG` on metastore |
 | Connect chat to Supervisor Agent | **Pending** | Chat calls LLM directly; Supervisor Agent registered in MLflow but not wired to `/api/chat` |
 | Document count tile | **Pending** | Count tile in Overview does not update after document upload |
