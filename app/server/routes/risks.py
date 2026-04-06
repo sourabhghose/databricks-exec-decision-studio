@@ -122,9 +122,12 @@ async def risk_ai_insights(risk_id: str = ""):
             f"Likelihood: {risk['likelihood']}, Consequence: {risk['consequence']}, "
             f"Score: {risk['risk_score']}/25, Owner: {risk['owner']}.\n"
             f"Current mitigation: {risk.get('mitigation', 'None stated')}.\n\n"
-            "Provide: (1) a 2-sentence assessment of whether the current mitigation is sufficient, "
-            "(2) one specific additional action to reduce this risk in the next 90 days, "
-            "(3) two early warning indicators to monitor. Be precise and commercially candid."
+            "Respond in plain text only — no markdown, no headers, no bullet symbols, no tables, no dashes.\n"
+            "Use exactly this structure:\n"
+            "Assessment: [2 sentences on whether current mitigation is sufficient]\n"
+            "Action: [one specific action to reduce this risk in the next 90 days]\n"
+            "Watch for: [two early warning indicators as a short comma-separated list]\n"
+            "Be precise and commercially candid."
         )
         insight = _call_llm(prompt)
         if insight:
@@ -141,6 +144,7 @@ async def risk_ai_insights(risk_id: str = ""):
 
     prompt = (
         f"You are Alinta Energy's Chief Risk Officer advisor. Risk register summary: {summary}. "
+        "Respond in plain text only — no markdown, no headers, no bullet symbols. "
         "In 3 sentences: identify the dominant risk theme, the most urgent single action, "
         "and whether the overall risk profile is improving or deteriorating. Be candid."
     )
