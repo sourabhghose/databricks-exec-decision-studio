@@ -11,7 +11,7 @@ import {
 import {
   TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle2,
   Clock, FileText, Users, Activity, Zap, ShieldAlert, RefreshCw,
-  X, ChevronRight, Sparkles,
+  X, ChevronRight, Sparkles, ArrowUp,
 } from "lucide-react";
 
 interface KPI {
@@ -420,7 +420,68 @@ function DrilldownDrawer({
   );
 }
 
-export default function Overview() {
+function GenieSearchBar({ onAsk }: { onAsk?: (q: string) => void }) {
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function submit() {
+    const q = value.trim();
+    if (!q || !onAsk) return;
+    onAsk(q);
+    setValue("");
+  }
+
+  return (
+    <div
+      className="rounded-2xl p-6"
+      style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+    >
+      <h2 className="text-center text-[22px] font-bold mb-4" style={{ color: "var(--text-1)" }}>
+        What would you like to know?
+      </h2>
+      <div
+        className="rounded-2xl px-5 py-4"
+        style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+      >
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder="Ask a question about KPIs, risks, financials, decisions..."
+          className="w-full bg-transparent outline-none text-[14px] mb-3"
+          style={{ color: "var(--text-1)" }}
+        />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={submit}
+              disabled={!value.trim() || !onAsk}
+              className="px-4 py-1.5 rounded-full text-[13px] font-semibold transition-all disabled:opacity-40"
+              style={{ background: "var(--text-1)", color: "var(--bg)" }}
+            >
+              Ask
+            </button>
+            <span className="text-[12px]" style={{ color: "var(--text-3)" }}>
+              Powered by Databricks AI/BI Genie
+            </span>
+          </div>
+          <button
+            onClick={submit}
+            disabled={!value.trim() || !onAsk}
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-all disabled:opacity-40"
+            style={{ background: "var(--text-1)", color: "var(--bg)" }}
+          >
+            <ArrowUp size={15} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Overview({ onAskGenie }: { onAskGenie?: (q: string) => void }) {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -587,6 +648,9 @@ export default function Overview() {
           onClose={closeDrilldown}
         />
       )}
+
+      {/* Genie search bar */}
+      <GenieSearchBar onAsk={onAskGenie} />
 
       {/* Header row */}
       <div className="flex items-center justify-between">

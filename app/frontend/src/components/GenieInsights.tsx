@@ -199,7 +199,13 @@ function TurnCard({ turn }: { turn: ConversationTurn }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function GenieInsights() {
+export default function GenieInsights({
+  initialQuestion = "",
+  onQuestionConsumed,
+}: {
+  initialQuestion?: string;
+  onQuestionConsumed?: () => void;
+}) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -207,6 +213,15 @@ export default function GenieInsights() {
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-submit question passed from Overview search bar
+  useEffect(() => {
+    if (initialQuestion) {
+      onQuestionConsumed?.();
+      submitQuestion(initialQuestion);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-scroll to bottom on new turns
   useEffect(() => {
