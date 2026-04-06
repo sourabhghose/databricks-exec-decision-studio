@@ -13,7 +13,13 @@ resources:
     serving_endpoint:
       name: databricks-claude-sonnet-4-6
       permission: CAN_QUERY
+  - name: genie_space
+    genie_space:
+      space_id: "01f13192ed5f16dfa0e16eb3e33c3a94"
+      permission: CAN_RUN
 
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     value: "33baaa9523773520"
+  - name: GENIE_SPACE_ID
+    valueFrom: genie_space
