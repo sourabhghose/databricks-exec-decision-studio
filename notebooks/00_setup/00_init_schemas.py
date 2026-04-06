@@ -440,6 +440,25 @@ if sp_uuid:
     # Vector Search index: SP must be able to query the index directly
     grant(f"GRANT SELECT ON TABLE {CATALOG}.eds_vectors.document_chunks_index TO {sp_ref}")
 
+    # SQL Warehouse: SP needs CAN_USE to run SQL statements
+    WAREHOUSE_ID = "33baaa9523773520"
+    try:
+        rw = requests.patch(
+            f"{host}/api/2.0/permissions/sql/warehouses/{WAREHOUSE_ID}",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"access_control_list": [{"user_name": sp_uuid, "permission_level": "CAN_USE"}]},
+            timeout=15,
+        )
+        if rw.ok:
+            granted += 1
+            print(f"  [OK] CAN_USE on warehouse {WAREHOUSE_ID}")
+        else:
+            failed += 1
+            print(f"  [WARN] Warehouse permission: {rw.status_code} {rw.text[:100]}")
+    except Exception as ex:
+        failed += 1
+        print(f"  [WARN] Warehouse permission: {ex}")
+
     # Job trigger permission — CAN_MANAGE_RUN allows the SP to call jobs/run-now
     # Required for automatic ingestion after document upload
     for job_id in [INGESTION_JOB_ID]:
