@@ -107,13 +107,7 @@ function AlintaIcon({ size = 36 }: { size?: number }) {
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [genieQuestion, setGenieQuestion] = useState<string>("");
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  function askGenie(question: string) {
-    setGenieQuestion(question);
-    selectTab("genie");
-  }
 
   const isAiActive = AI_ASSISTANT_IDS.has(activeTab);
 
@@ -320,7 +314,7 @@ export default function App() {
       {/* ── Page content ─────────────────────────────────────────────────── */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto p-6">
         <div className="animate-fade-in">
-          {activeTab === "overview"   && <Overview onAskGenie={askGenie} />}
+          {activeTab === "overview"   && <Overview />}
           {activeTab === "chat"       && <Chat />}
           {activeTab === "kpi"        && <KPIDashboard />}
           {activeTab === "risks"      && <RiskRegister />}
@@ -330,7 +324,7 @@ export default function App() {
           {activeTab === "briefing"   && <Briefing />}
           {activeTab === "market"     && <MarketIntelligence />}
           {activeTab === "simulate"   && <ScenarioSimulator />}
-          {activeTab === "genie"      && <GenieInsights initialQuestion={genieQuestion} onQuestionConsumed={() => setGenieQuestion("")} />}
+          {activeTab === "genie"      && <GenieInsights />}
           {activeTab === "audit"      && <AuditLog />}
           {activeTab === "about"      && <About />}
         </div>

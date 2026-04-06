@@ -11,7 +11,7 @@ import {
 import {
   TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle2,
   Clock, FileText, Users, Activity, Zap, ShieldAlert, RefreshCw,
-  X, ChevronRight, Sparkles, ArrowUp,
+  X, ChevronRight, Sparkles,
 } from "lucide-react";
 
 interface KPI {
@@ -420,88 +420,7 @@ function DrilldownDrawer({
   );
 }
 
-function GenieSearchBar({ onAsk }: { onAsk?: (q: string) => void }) {
-  const [value, setValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function submit() {
-    const q = value.trim();
-    if (!q || !onAsk) return;
-    onAsk(q);
-    setValue("");
-  }
-
-  return (
-    <div
-      className="rounded-2xl px-8 pt-7 pb-5"
-      style={{
-        background: "linear-gradient(135deg, #16181f 0%, #1e2028 55%, #221e2a 100%)",
-        boxShadow: "inset 0 0 80px 0 rgba(244,121,32,0.04), 0 1px 3px rgba(0,0,0,0.4)",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      {/* Subtle warm glow bottom-right */}
-      <div style={{
-        position: "absolute", bottom: 0, right: 0,
-        width: 320, height: 160,
-        background: "radial-gradient(ellipse at bottom right, rgba(244,121,32,0.10) 0%, transparent 70%)",
-        pointerEvents: "none",
-      }} />
-
-      <h2 className="text-center text-[22px] font-bold mb-5" style={{ color: "#fff" }}>
-        What would you like to know?
-      </h2>
-
-      {/* Input card */}
-      <div
-        className="rounded-xl px-4 pt-3 pb-3"
-        style={{ background: "rgba(255,255,255,0.05)" }}
-      >
-        <input
-          ref={inputRef}
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-          placeholder="Search for Dashboards and Genie spaces..."
-          className="w-full bg-transparent outline-none text-[13px] mb-3"
-          style={{ color: "rgba(255,255,255,0.85)", caretColor: "#F47920" }}
-        />
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={submit}
-              disabled={!value.trim() || !onAsk}
-              className="px-4 py-1 rounded-full text-[12px] font-semibold transition-all disabled:opacity-40"
-              style={{ background: "#111318", color: "#fff", border: "1px solid rgba(255,255,255,0.12)" }}
-            >
-              Search
-            </button>
-            <button
-              onClick={submit}
-              disabled={!value.trim() || !onAsk}
-              className="text-[12px] font-medium transition-all disabled:opacity-40"
-              style={{ color: "rgba(255,255,255,0.5)" }}
-            >
-              Ask
-            </button>
-          </div>
-          <button
-            onClick={submit}
-            disabled={!value.trim() || !onAsk}
-            className="w-7 h-7 rounded-full flex items-center justify-center transition-all disabled:opacity-30"
-            style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}
-          >
-            <ArrowUp size={13} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Overview({ onAskGenie }: { onAskGenie?: (q: string) => void }) {
+export default function Overview() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -668,9 +587,6 @@ export default function Overview({ onAskGenie }: { onAskGenie?: (q: string) => v
           onClose={closeDrilldown}
         />
       )}
-
-      {/* Genie search bar */}
-      <GenieSearchBar onAsk={onAskGenie} />
 
       {/* Header row */}
       <div className="flex items-center justify-between">
