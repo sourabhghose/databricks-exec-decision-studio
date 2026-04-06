@@ -433,15 +433,30 @@ function GenieSearchBar({ onAsk }: { onAsk?: (q: string) => void }) {
 
   return (
     <div
-      className="rounded-2xl p-6"
-      style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+      className="rounded-2xl px-8 pt-7 pb-5"
+      style={{
+        background: "linear-gradient(135deg, #16181f 0%, #1e2028 55%, #221e2a 100%)",
+        boxShadow: "inset 0 0 80px 0 rgba(244,121,32,0.04), 0 1px 3px rgba(0,0,0,0.4)",
+        position: "relative",
+        overflow: "hidden",
+      }}
     >
-      <h2 className="text-center text-[22px] font-bold mb-4" style={{ color: "var(--text-1)" }}>
+      {/* Subtle warm glow bottom-right */}
+      <div style={{
+        position: "absolute", bottom: 0, right: 0,
+        width: 320, height: 160,
+        background: "radial-gradient(ellipse at bottom right, rgba(244,121,32,0.10) 0%, transparent 70%)",
+        pointerEvents: "none",
+      }} />
+
+      <h2 className="text-center text-[22px] font-bold mb-5" style={{ color: "#fff" }}>
         What would you like to know?
       </h2>
+
+      {/* Input card */}
       <div
-        className="rounded-2xl px-5 py-4"
-        style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+        className="rounded-xl px-4 pt-3 pb-3"
+        style={{ background: "rgba(255,255,255,0.05)" }}
       >
         <input
           ref={inputRef}
@@ -449,31 +464,36 @@ function GenieSearchBar({ onAsk }: { onAsk?: (q: string) => void }) {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-          placeholder="Ask a question about KPIs, risks, financials, decisions..."
-          className="w-full bg-transparent outline-none text-[14px] mb-3"
-          style={{ color: "var(--text-1)" }}
+          placeholder="Search for Dashboards and Genie spaces..."
+          className="w-full bg-transparent outline-none text-[13px] mb-3"
+          style={{ color: "rgba(255,255,255,0.85)", caretColor: "#F47920" }}
         />
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               onClick={submit}
               disabled={!value.trim() || !onAsk}
-              className="px-4 py-1.5 rounded-full text-[13px] font-semibold transition-all disabled:opacity-40"
-              style={{ background: "var(--text-1)", color: "var(--bg)" }}
+              className="px-4 py-1 rounded-full text-[12px] font-semibold transition-all disabled:opacity-40"
+              style={{ background: "#111318", color: "#fff", border: "1px solid rgba(255,255,255,0.12)" }}
+            >
+              Search
+            </button>
+            <button
+              onClick={submit}
+              disabled={!value.trim() || !onAsk}
+              className="text-[12px] font-medium transition-all disabled:opacity-40"
+              style={{ color: "rgba(255,255,255,0.5)" }}
             >
               Ask
             </button>
-            <span className="text-[12px]" style={{ color: "var(--text-3)" }}>
-              Powered by Databricks AI/BI Genie
-            </span>
           </div>
           <button
             onClick={submit}
             disabled={!value.trim() || !onAsk}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition-all disabled:opacity-40"
-            style={{ background: "var(--text-1)", color: "var(--bg)" }}
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-all disabled:opacity-30"
+            style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}
           >
-            <ArrowUp size={15} />
+            <ArrowUp size={13} />
           </button>
         </div>
       </div>
