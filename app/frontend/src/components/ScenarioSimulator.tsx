@@ -286,18 +286,32 @@ export default function ScenarioSimulator() {
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let accumulated = "";
+        let lineBuffer = ""; // buffer for incomplete SSE lines across chunk boundaries
 
         function pump(): Promise<void> {
           return reader.read().then(({ done, value }) => {
             if (done) {
               setStreaming(false);
-              // Final parse attempt
-              const parsed = tryParseScenarioJson(accumulated);
-              if (!parsed) setParseError(true);
+              // Fallback: if "result" event never arrived, try parsing accumulated tokens
+              setScenarioTree((prev) => {
+                if (prev) return prev; // already set by "result" event
+                const parsed = tryParseScenarioJson(accumulated);
+                if (parsed) {
+                  setParseError(false);
+                  return parsed;
+                }
+                setParseError(true);
+                return null;
+              });
               return;
             }
             const chunk = decoder.decode(value, { stream: true });
-            chunk.split("\n").forEach((line) => {
+            // Prepend any buffered incomplete line from previous chunk
+            const text = lineBuffer + chunk;
+            const lines = text.split("\n");
+            // Last element may be incomplete — buffer it
+            lineBuffer = lines.pop() ?? "";
+            lines.forEach((line) => {
               if (!line.startsWith("data: ")) return;
               try {
                 const evt = JSON.parse(line.slice(6));
@@ -305,13 +319,23 @@ export default function ScenarioSimulator() {
                   accumulated += evt.content;
                   setRawJson(accumulated);
                 }
-                if (evt.type === "done") setStreaming(false);
+                // "result" carries the complete assembled JSON — use this for parsing
+                if (evt.type === "result") {
+                  const parsed = tryParseScenarioJson(evt.content ?? "");
+                  if (parsed) {
+                    setScenarioTree(parsed);
+                    setParseError(false);
+                  }
+                }
+                if (evt.type === "done") {
+                  setStreaming(false);
+                }
                 if (evt.type === "error") {
                   setStreaming(false);
                   setParseError(true);
                 }
               } catch {
-                // partial SSE line — ignore
+                // malformed SSE line — ignore
               }
             });
             return pump();

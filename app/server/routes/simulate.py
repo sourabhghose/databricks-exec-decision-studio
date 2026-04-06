@@ -67,6 +67,87 @@ DECISION_TEMPLATES = [
             "Assess revenue certainty, policy risk, and competitive dynamics."
         ),
     },
+    {
+        "label": "Battery Storage Investment",
+        "text": (
+            "Should Alinta invest in utility-scale battery energy storage (200MW/400MWh, ~$180M) "
+            "co-located with Yandin Wind Farm, pursue a smaller staged 50MW pilot, "
+            "or rely on gas peakers for firming capacity? "
+            "Consider WEM ancillary services revenue, renewable integration value, and capital payback."
+        ),
+    },
+    {
+        "label": "Newman Gas Station Life Extension",
+        "text": (
+            "Should Alinta extend the Newman Power Station operating life by 10 years to serve "
+            "the Pilbara mining customers, invest in a full refurbishment ($65M), "
+            "or exit the contract and redeploy capital to renewables? "
+            "Consider BHP and Rio Tinto contract renewal risk and stranded asset exposure."
+        ),
+    },
+    {
+        "label": "Retail Pricing Strategy",
+        "text": (
+            "Should Alinta defend market share by holding retail electricity prices below competitors, "
+            "pass through wholesale cost increases to protect EBITDA margin, "
+            "or introduce a tiered green energy product to attract premium segments? "
+            "Assess churn risk, NPS trajectory, and margin impact across 1M+ customer base."
+        ),
+    },
+    {
+        "label": "M&A: Distributed Energy Platform",
+        "text": (
+            "Should Alinta acquire a distributed energy / rooftop solar platform to defend against "
+            "retail customer defection, build organically through partnerships with installers, "
+            "or maintain a generation-only strategy and cede the prosumer segment? "
+            "Consider $150-250M acquisition range, integration risk, and long-term customer lifetime value."
+        ),
+    },
+    {
+        "label": "Carbon Offset & Net Zero Strategy",
+        "text": (
+            "Should Alinta purchase high-quality carbon offsets to meet interim Net Zero milestones "
+            "while the generation fleet transitions, invest directly in carbon capture projects, "
+            "or accelerate renewable capacity additions and retire thermal assets faster? "
+            "Assess regulatory risk, ESG investor expectations, and cost per tonne abated."
+        ),
+    },
+    {
+        "label": "Hydrogen Feasibility",
+        "text": (
+            "Should Alinta commit to a green hydrogen pilot at the Alinta Energy Industrial precinct "
+            "(20MW electrolyser, ~$55M), form a joint venture with a major industrial offtaker, "
+            "or defer until 2027 when electrolyser costs are projected to fall 30%? "
+            "Consider export opportunity, WA Government hydrogen strategy alignment, and technology risk."
+        ),
+    },
+    {
+        "label": "Digital & AI Transformation",
+        "text": (
+            "Should Alinta invest $30M over 3 years in an enterprise AI and data platform "
+            "to drive operational efficiency and predictive maintenance across generation assets, "
+            "pursue targeted best-of-breed tools, or outsource analytics to a managed service provider? "
+            "Assess productivity uplift, vendor lock-in risk, and workforce capability requirements."
+        ),
+    },
+    {
+        "label": "FY2027 Dividend Policy",
+        "text": (
+            "Should Alinta maintain the 60% dividend payout ratio in FY2027 as capital expenditure "
+            "peaks on the renewable programme, reduce to 40% to preserve balance sheet flexibility, "
+            "or suspend the dividend for two years and communicate a capital return in FY2029? "
+            "Assess shareholder expectations, credit rating implications, and funding alternatives."
+        ),
+    },
+    {
+        "label": "Cybersecurity OT Uplift",
+        "text": (
+            "Should Alinta accelerate the OT Cybersecurity Uplift Program to complete within 12 months "
+            "($18M, double the current resource), maintain the 18-month plan, "
+            "or outsource SCADA security monitoring to a specialist managed security service provider? "
+            "Consider rising threat landscape, regulatory obligations, and operational continuity risk."
+        ),
+    },
 ]
 
 
@@ -397,6 +478,7 @@ async def simulate_stream(req: SimulateRequest):
                     yield f"data: {json.dumps({'type': 'error', 'content': f'LLM error {resp.status_code}'})}\n\n"
                 else:
                     finish_reason = "unknown"
+                    full_content = ""
                     for line in resp.iter_lines():
                         if not line:
                             continue
@@ -414,12 +496,18 @@ async def simulate_stream(req: SimulateRequest):
                                 finish_reason = fr
                             content = choice.get("delta", {}).get("content", "")
                             if content:
+                                full_content += content
                                 yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
                         except Exception:
                             pass
+                    # Emit the complete assembled content as a single authoritative event.
+                    # The frontend uses this for JSON parsing instead of reassembling tokens,
+                    # which avoids chunk-boundary issues across the SSE stream.
+                    if full_content:
+                        yield f"data: {json.dumps({'type': 'result', 'content': full_content})}\n\n"
                     print(
                         f"[SIMULATE] branch={drilldown_branch or 'tree'} "
-                        f"finish={finish_reason} "
+                        f"finish={finish_reason} chars={len(full_content)} "
                         f"latency={int((time.time() - start) * 1000)}ms"
                     )
         except Exception as e:

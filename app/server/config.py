@@ -87,9 +87,19 @@ AGENT_PROMPTS = {
         '    { "label": "Base", ... },\n    { "label": "Bull", ... }\n  ],\n'
         '  "recommended": "Bear"|"Base"|"Bull",\n'
         '  "recommendation_rationale": "<2 sentences>"\n}\n\n'
-        "Rules: probabilities must sum to 1.0. Include 3-4 key_assumptions, "
-        "3-5 kpi_impact entries using KPI names from the data context, "
-        "and 2-3 risk_factors per scenario. Be commercially specific to Alinta Energy."
+        "Rules:\n"
+        "- Probabilities must sum to 1.0.\n"
+        "- Include 3-4 key_assumptions, 3-5 kpi_impact entries using KPI names from the data context, "
+        "and 2-3 risk_factors per scenario.\n"
+        "- Be commercially specific to Alinta Energy.\n"
+        "- For 'recommended': choose based on the actual risk-reward profile of this specific decision — "
+        "do NOT default to Base. "
+        "Recommend Bear when downside risks are severe and capital preservation is critical. "
+        "Recommend Bull when conditions are clearly favourable and upside is material and achievable. "
+        "Recommend Base only when neither Bear nor Bull is clearly dominant. "
+        "Use the open risks and KPI data context to inform this judgement — "
+        "if Critical risks are present and relevant, weight toward Bear; "
+        "if KPIs are tracking above target and macro conditions are supportive, weight toward Bull."
     ),
     "scenario_drilldown": (
         "You are Alinta Energy's Strategic Scenario Advisor. "

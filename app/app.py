@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from server.routes import chat, kpi, audit, actions, risks, decisions, documents, briefing, overview, market, export, upload, vector_search, simulate
 
@@ -41,7 +41,15 @@ app.include_router(simulate.router)
 # ── Health check ─────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
-    return {"status": "healthy", "app": "Executive Decision Studio", "version": "2.0.0"}
+    assets = list((FRONTEND_DIR / "assets").glob("index-*.js")) if (FRONTEND_DIR / "assets").exists() else []
+    return {
+        "status": "healthy",
+        "app": "Executive Decision Studio",
+        "version": "2.0.0",
+        "frontend_dir": str(FRONTEND_DIR),
+        "frontend_exists": FRONTEND_DIR.exists(),
+        "js_bundles": [f.name for f in assets],
+    }
 
 
 # ── Serve React SPA from frontend/dist ───────────────────────────────────────
@@ -65,8 +73,13 @@ if FRONTEND_DIR.exists():
         if full_path and file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
 
-        # Fallback to index.html for SPA routing
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+        # Fallback to index.html for SPA routing — no-cache so proxy never serves stale HTML
+        index_path = FRONTEND_DIR / "index.html"
+        content = index_path.read_text()
+        return HTMLResponse(
+            content=content,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
 else:
     print(f"[EDS] WARNING: {FRONTEND_DIR} not found. Run 'cd frontend && npm run build'")
 
