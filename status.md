@@ -1,5 +1,5 @@
 # Executive Decision Studio — Project Status
-**Last updated:** 2026-04-06 (session 6)
+**Last updated:** 2026-04-06 (session 8)
 
 ---
 
@@ -82,7 +82,8 @@ Each file: `{doc_id}.txt` with YAML frontmatter + full document text.
 Overview  |  AI Assistant ▾  |  Market Intel  |  KPI Dashboard  |  Risk Register
           |   ├ Strategic Chat               Decisions  |  Action Items  |  Document Library
           |   ├ AI Briefing                  Audit Log  |  About
-          └   └ Simulation
+          |   ├ Simulation
+          └   └ Data Insights
 ```
 
 | Tab | Component | Backend |
@@ -189,11 +190,28 @@ Overview  |  AI Assistant ▾  |  Market Intel  |  KPI Dashboard  |  Risk Regist
 
 | Change | Detail |
 |--------|--------|
-| **Data Insights tab (Genie)** | New AI Assistant sub-tab powered by Databricks AI/BI Genie; natural-language queries over 5 EDS Unity Catalog tables; multi-turn conversation; narrative + data table + SQL disclosure |
-| **Genie automation notebook** | `notebooks/00_setup/06_create_genie_space.py` — idempotent space creation via `POST /api/2.0/data-rooms/`, 10 curated questions, patches `app/app.yaml` with `genie_space` resource and `GENIE_SPACE_ID` env var |
-| **`/api/genie/query` route** | `app/server/routes/genie.py` — wraps Genie Conversation API with 60s polling; 5-category demo fallback so tab always works without Genie Space configured |
-| **`eds_genie_job` DAB job** | Added to `databricks.yml`; also wired as 3rd task in `eds_full_install_job` (runs after SP grants) |
-| **Demo fallback** | 5 keyword-matched demo responses (KPI, risk, financial, actions, decisions) — realistic live-looking data |
+| **Data Insights tab (Genie)** | New AI Assistant sub-tab powered by Databricks AI/BI Genie; natural-language queries over 5 EDS Unity Catalog tables; multi-turn conversation; markdown narrative with bullet rendering; data table (20-row preview + show all) |
+| **Genie automation notebook** | `notebooks/00_setup/06_create_genie_space.py` — idempotent; creates space via `POST /api/2.0/data-rooms/` with 5 EDS tables + 10 curated questions; patches `app/app.yaml` in workspace |
+| **Genie Space live** | Space ID `01f13192ed5f16dfa0e16eb3e33c3a94` created and active; SP granted `CAN_RUN` via `PUT /api/2.0/permissions/genie/{id}`; `GENIE_SPACE_ID` env var hardcoded in `app.yaml` |
+| **`/api/genie/query` route** | `app/server/routes/genie.py` — Conversation API with 60s polling (`/0` chunk suffix for query-result); 5-category demo fallback |
+| **`eds_genie_job` DAB job** | Added to `databricks.yml`; wired as 3rd task in `eds_full_install_job` (after SP grants) |
+| **18 quick-question chips** | Persistent chips (don't hide after conversation starts); 18 Alinta-specific questions |
+| **Overview Genie search bar** | Search input below the header row; matches dashboard theme; arrow-up submit; navigates to Data Insights and auto-submits question |
+| **Markdown narrative rendering** | `**bold**` rendered as `<strong>`; ` - item` bullet separators rendered as orange-dot bullet list |
+| **Query result fix** | Appended `/0` chunk index to query-result URL — rows now populate correctly |
+
+---
+
+## Genie Space
+
+| Property | Value |
+|----------|-------|
+| Space ID | `01f13192ed5f16dfa0e16eb3e33c3a94` |
+| Display name | EDS — Executive Data Explorer |
+| Warehouse | `33baaa9523773520` |
+| Tables | kpi_timeseries, risk_register, financial_data, action_items, decision_register |
+| SP permission | `CAN_RUN` ✅ |
+| `GENIE_SPACE_ID` env var | Set in `app.yaml` ✅ |
 
 ---
 
@@ -201,7 +219,6 @@ Overview  |  AI Assistant ▾  |  Market Intel  |  KPI Dashboard  |  Risk Regist
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Genie Space activation | **Pending deploy** | Run `databricks bundle run eds_genie_job` then `./scripts/deploy.sh` to wire up live Genie |
 | Rename catalog to `eds` | **BLOCKED** | Requires metastore/account admin — current user lacks `CREATE CATALOG` on metastore |
 | Connect chat to Supervisor Agent | **Pending** | Chat calls LLM directly; Supervisor Agent registered in MLflow but not wired to `/api/chat` |
 | Document count tile | **Pending** | Count tile in Overview does not update after document upload |

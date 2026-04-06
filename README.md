@@ -13,7 +13,8 @@ A production Databricks App that gives board directors, the CFO, and the C-suite
 | **Strategic Chat** | RAG-powered Q&A over 22 classified board documents; SSE streaming with inline Recharts visualisations; 32 C-level sample questions; PDF / PPTX / MD export |
 | **AI Briefing** | On-demand executive briefings (Weekly, Board, Investor, Crisis); 4 000-token Claude response; markdown tables; PDF / PPTX / MD export |
 | **Scenario Simulation** | Bear / Base / Bull decision simulation grounded in live Alinta KPI, financial, and risk data; 15 Alinta-specific quick-start templates; drill-down narrative; save to Decision Register |
-| **Executive Overview** | Live KPI cards, risk heatmap, action items, decision log — every metric clickable to drill-down drawer with AI analysis |
+| **Data Insights (Genie)** | Natural-language SQL queries over live Unity Catalog tables via Databricks AI/BI Genie; multi-turn conversation; 18 quick-question chips; markdown narrative; data table with show-all; auto-submits from Overview search bar |
+| **Executive Overview** | Live KPI cards, risk heatmap, action items, decision log — every metric clickable to drill-down drawer with AI analysis; Genie search bar for instant data queries |
 | **Market Intelligence** | Live competitor news (GDELT), ASX peer stocks with sparklines (Yahoo Finance), carbon prices with trend charts (CER) |
 | **KPI Dashboard** | 12 KPIs across 4 business units with trend sparklines and status badges |
 | **Risk Register** | Enterprise risk register with likelihood/consequence matrix |
@@ -31,15 +32,17 @@ A production Databricks App that gives board directors, the CFO, and the C-suite
 │                       Databricks App                            │
 │                                                                 │
 │  React 18 (Vite + TypeScript + Tailwind CSS)                    │
-│  ├── AI Assistant dropdown (Strategic Chat / Briefing / Sim)    │
+│  ├── AI Assistant dropdown (Chat / Briefing / Sim / Genie)      │
 │  ├── SSE streaming — token + result + chart events              │
 │  ├── Recharts inline charts, PDF/PPTX/MD export                 │
+│  ├── Overview Genie search bar → auto-submits to Data Insights  │
 │  └── Alinta Energy dark-mode brand (#F47920 orange)             │
 │                                                                 │
 │  FastAPI (uvicorn)                                              │
-│  ├── 19 routes — overview, chat, briefing, simulate, KPI …      │
+│  ├── 20 routes — overview, chat, briefing, simulate, genie …    │
 │  ├── SQL Warehouse for live data (Unity Catalog)                │
-│  └── Databricks serving endpoint (Claude Sonnet 4.6)           │
+│  ├── Databricks serving endpoint (Claude Sonnet 4.6)            │
+│  └── Genie Conversation API (/api/genie/query)                  │
 └──────────────────┬──────────────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────────────┐
@@ -56,6 +59,8 @@ A production Databricks App that gives board directors, the CFO, and the C-suite
 │  Vector Search endpoint:  eds-vector-search                     │
 │  Embedding model:         databricks-gte-large-en               │
 │  LLM:                     databricks-claude-sonnet-4-6          │
+│  Genie Space:             EDS — Executive Data Explorer         │
+│                           (5 tables, 18 curated questions)      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,7 +70,8 @@ A production Databricks App that gives board directors, the CFO, and the C-suite
 Overview  │  AI Assistant ▾         │  Market Intel  │  KPI Dashboard  │  Risk Register
           │   ├ Strategic Chat      │  Decisions  │  Action Items  │  Document Library
           │   ├ AI Briefing         │  Audit Log  │  About
-          └   └ Simulation
+          │   ├ Simulation
+          └   └ Data Insights
 ```
 
 ### Scenario Simulation flow
@@ -108,6 +114,7 @@ POST /api/simulate/stream
 │   │       ├── chat.py               # POST /api/chat/stream (SSE + RAG)
 │   │       ├── briefing.py           # POST /api/briefing/stream (SSE)
 │   │       ├── simulate.py           # POST /api/simulate/stream (SSE Bear/Base/Bull)
+│   │       ├── genie.py              # POST /api/genie/query (Genie Conversation API)
 │   │       ├── kpi.py
 │   │       ├── risks.py
 │   │       ├── decisions.py          # GET + POST /api/decisions/save
@@ -120,13 +127,15 @@ POST /api/simulate/stream
 │   └── frontend/
 │       ├── src/
 │       │   ├── App.tsx               # Navigation + tab routing
-│       │   └── components/           # 12 React tab components
+│       │   └── components/           # 13 React tab components
+│       │       └── GenieInsights.tsx # Data Insights — Genie conversational UI
 │       ├── vite.config.ts
 │       └── package.json
 ├── notebooks/
 │   ├── 00_setup/
 │   │   ├── 00_init_schemas.py        # Schema + synthetic data + SP grants banner
-│   │   └── 05_grant_app_permissions.py  # Standalone SP grants (run after deploy)
+│   │   ├── 05_grant_app_permissions.py  # Standalone SP grants (run after deploy)
+│   │   └── 06_create_genie_space.py  # Idempotent Genie Space creation + app.yaml patch
 │   ├── 01_ingestion/                 # Document chunking + embedding
 │   ├── 02_rag/                       # RAG chain (LangChain + MLflow)
 │   └── 03_agents/                    # Supervisor agent deployment
@@ -205,6 +214,34 @@ databricks jobs run-now <eds_grant_permissions_job_id> --profile=<profile>
 
 Or manually in the Databricks UI: run `notebooks/00_setup/05_grant_app_permissions.py`.
 
+### 4. Create Genie Space (Data Insights tab)
+
+Run the Genie setup job to create the AI/BI Genie Space, add 10 curated questions, and inject `GENIE_SPACE_ID` into `app.yaml`:
+
+```bash
+databricks bundle run eds_genie_job --profile=<profile>
+```
+
+Then grant the app SP `CAN_RUN` on the Genie Space and redeploy:
+
+```bash
+# Grant SP access (replace SPACE_ID and SP_NAME with values from the job output)
+curl -X PUT -H "Authorization: Bearer <token>" \
+  "https://<workspace>/api/2.0/permissions/genie/<SPACE_ID>" \
+  -d '{"access_control_list":[{"service_principal_name":"<SP_NAME>","permission_level":"CAN_RUN"}]}'
+
+# Redeploy to activate GENIE_SPACE_ID env var
+./scripts/deploy.sh <profile>
+```
+
+Or run the full one-command install (includes Genie setup):
+
+```bash
+databricks bundle deploy --profile=<profile>
+databricks bundle run eds_full_install_job --profile=<profile>
+./scripts/deploy.sh <profile>
+```
+
 ---
 
 ## Tech stack
@@ -217,6 +254,7 @@ Or manually in the Databricks UI: run `notebooks/00_setup/05_grant_app_permissio
 | **RAG** | LangChain, MLflow (models-from-code), Databricks Vector Search |
 | **Embeddings** | `databricks-gte-large-en` |
 | **Data** | Databricks SQL Warehouse, Unity Catalog, Delta Lake |
+| **Genie** | Databricks AI/BI Genie Conversation API (`/api/2.0/genie/spaces/`) |
 | **Deployment** | Databricks Apps, Databricks Asset Bundles (DABs) |
 | **Auth** | Service principal (auto-injected by Databricks Apps runtime) |
 
@@ -233,6 +271,12 @@ Or manually in the Databricks UI: run `notebooks/00_setup/05_grant_app_permissio
 **SP grants at runtime** — `05_grant_app_permissions.py` discovers the app's service principal UUID via the Apps API + SCIM, then issues all required `GRANT` statements dynamically. Permissions survive app recreation.
 
 **Scenario grounding in live data** — before calling Claude, `/api/simulate/stream` fetches the latest KPIs, financial summary by business unit, and open High/Critical risks from Unity Catalog. This grounds Bear/Base/Bull projections in real Alinta numbers rather than hallucinated percentages.
+
+**Genie Space automation** — `06_create_genie_space.py` is idempotent: it checks for an existing space by name before creating, so re-running `eds_genie_job` never duplicates spaces. SP `CAN_RUN` permission is granted via `PUT /api/2.0/permissions/genie/{id}`. `GENIE_SPACE_ID` is hardcoded in `app.yaml` (Databricks Apps does not yet support `valueFrom` for genie resources).
+
+**Genie query-result chunk index** — the Genie Conversation API query-result endpoint requires a `/0` chunk suffix (`GET .../query-result/0`). Omitting it returns schema columns but empty `data_array`.
+
+**Overview → Genie navigation** — the Overview search bar passes the typed question through `App.tsx` state (`genieQuestion`) to `GenieInsights` via prop. On mount, `GenieInsights` auto-submits the question and clears the state via `onQuestionConsumed`, so navigating back to Overview doesn't re-submit.
 
 ---
 

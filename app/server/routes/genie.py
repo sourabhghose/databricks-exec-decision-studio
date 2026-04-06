@@ -251,22 +251,26 @@ def _poll_message(
 def _get_query_result(
     tok: str, url: str, space_id: str, conversation_id: str, message_id: str
 ) -> tuple[list[str], list[list]]:
-    """Fetch query result rows. Returns (columns, rows)."""
+    """Fetch query result rows (chunk 0). Returns (columns, rows)."""
     resp = requests.get(
-        f"{url}/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result",
+        f"{url}/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result/0",
         headers=_headers(tok),
         timeout=30,
     )
     if not resp.ok:
+        print(f"[genie] query-result failed: {resp.status_code} {resp.text[:200]}")
         return [], []
     data = resp.json()
+    print(f"[genie] query-result keys: {list(data.keys())}")
     try:
         sr = data["statement_response"]
         schema = sr["manifest"]["schema"]["columns"]
         columns = [c["name"] for c in schema]
         rows = sr.get("result", {}).get("data_array", [])
+        print(f"[genie] columns={columns} rows={len(rows)}")
         return columns, rows
-    except (KeyError, TypeError):
+    except (KeyError, TypeError) as e:
+        print(f"[genie] parse error: {e} — raw: {str(data)[:300]}")
         return [], []
 
 
