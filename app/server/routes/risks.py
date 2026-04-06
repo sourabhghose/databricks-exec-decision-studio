@@ -2,7 +2,7 @@
 
 import requests
 from fastapi import APIRouter
-from server.config import CATALOG, get_token, get_warehouse_id, get_workspace_url
+from server.config import CATALOG, LLM_ENDPOINT, get_token, get_warehouse_id, get_workspace_url
 
 router = APIRouter()
 
@@ -74,67 +74,62 @@ DEMO_RISK_INSIGHT = (
 )
 
 
-def _run_sql_slow(sql: str) -> list:
+def _call_llm(prompt: str) -> str | None:
+    """Call Claude directly via serving endpoint. Returns text or None on failure."""
     tok = get_token()
-    wh = get_warehouse_id()
     url = get_workspace_url()
-    if not tok or not wh:
-        return []
+    if not tok or not url:
+        return None
     try:
         r = requests.post(
-            f"{url}/api/2.0/sql/statements",
+            f"{url}/serving-endpoints/{LLM_ENDPOINT}/invocations",
             headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-            json={"warehouse_id": wh, "statement": sql, "wait_timeout": "60s"},
-            timeout=75,
+            json={
+                "model": LLM_ENDPOINT,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 400,
+                "temperature": 0.3,
+            },
+            timeout=60,
         )
         if not r.ok:
-            return []
-        d = r.json()
-        if d.get("status", {}).get("state") != "SUCCEEDED":
-            return []
-        result = d.get("result", {})
-        if not result.get("data_array"):
-            return []
-        cols = [c["name"] for c in d.get("manifest", {}).get("schema", {}).get("columns", [])]
-        return [dict(zip(cols, row)) for row in result["data_array"]]
+            print(f"[risks/llm] {r.status_code} {r.text[:200]}")
+            return None
+        return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"[SQL/risks slow] {e}")
-        return []
+        print(f"[risks/llm] {e}")
+        return None
 
 
 @router.get("/api/risks/ai_insights")
 async def risk_ai_insights(risk_id: str = ""):
-    """AI analysis for a specific risk or overall risk register via ai_query."""
+    """AI analysis for a specific risk or overall risk register."""
     if risk_id:
-        # Per-risk deep analysis
-        all_risks = DEMO_RISKS
         rows = _run_sql(f"""
             SELECT risk_id, category, description, likelihood, consequence,
                    rating, risk_score, owner, mitigation, status
             FROM {CATALOG}.eds_synthetic.risk_register
             WHERE risk_id = '{risk_id.replace("'", "")}'
         """)
-        if rows:
-            all_risks = rows
-        risk = next((r for r in all_risks if r.get("risk_id") == risk_id), None)
+        risk = (rows or DEMO_RISKS)
+        risk = next((r for r in risk if r.get("risk_id") == risk_id), None)
         if not risk:
             return {"insight": "Risk not found.", "demo": True}
 
         prompt = (
-            f"You are Alinta Energy's Enterprise Risk Advisor. Analyse this risk: "
-            f"[{risk['rating']}] {risk['description']} "
+            f"You are Alinta Energy's Enterprise Risk Advisor. Analyse this risk:\n"
+            f"[{risk['rating']}] {risk['description']}\n"
             f"Likelihood: {risk['likelihood']}, Consequence: {risk['consequence']}, "
-            f"Score: {risk['risk_score']}/25, Owner: {risk['owner']}. "
-            f"Current mitigation: {risk.get('mitigation', 'None stated')}. "
+            f"Score: {risk['risk_score']}/25, Owner: {risk['owner']}.\n"
+            f"Current mitigation: {risk.get('mitigation', 'None stated')}.\n\n"
             "Provide: (1) a 2-sentence assessment of whether the current mitigation is sufficient, "
             "(2) one specific additional action to reduce this risk in the next 90 days, "
-            "(3) any early warning indicators to monitor. Be precise and commercially candid."
-        ).replace("'", "''")
-
-        result = _run_sql_slow(f"SELECT ai_query('databricks-claude-sonnet-4-6', '{prompt}') as insight")
-        if result and result[0].get("insight"):
-            return {"insight": str(result[0]["insight"]), "demo": False, "risk_id": risk_id}
-        return {"insight": f"Current mitigation for {risk_id}: {risk.get('mitigation', 'None stated')}. AI analysis unavailable.", "demo": True, "risk_id": risk_id}
+            "(3) two early warning indicators to monitor. Be precise and commercially candid."
+        )
+        insight = _call_llm(prompt)
+        if insight:
+            return {"insight": insight, "demo": False, "risk_id": risk_id}
+        return {"insight": f"Mitigation: {risk.get('mitigation', 'None stated')}", "demo": True, "risk_id": risk_id}
 
     # Overall risk register summary
     rows = _run_sql(f"""
@@ -142,18 +137,14 @@ async def risk_ai_insights(risk_id: str = ""):
         FROM {CATALOG}.eds_synthetic.risk_register
         GROUP BY rating ORDER BY max_score DESC
     """)
-    if rows:
-        summary = ", ".join([f"{r['rating']}: {r['cnt']} risks" for r in rows])
-    else:
-        summary = "Critical: 2, High: 5, Medium: 3"
+    summary = ", ".join([f"{r['rating']}: {r['cnt']} risks" for r in rows]) if rows else "Critical: 2, High: 5, Medium: 3"
 
     prompt = (
         f"You are Alinta Energy's Chief Risk Officer advisor. Risk register summary: {summary}. "
         "In 3 sentences: identify the dominant risk theme, the most urgent single action, "
         "and whether the overall risk profile is improving or deteriorating. Be candid."
-    ).replace("'", "''")
-
-    result = _run_sql_slow(f"SELECT ai_query('databricks-claude-sonnet-4-6', '{prompt}') as insight")
-    if result and result[0].get("insight"):
-        return {"insight": str(result[0]["insight"]), "demo": False}
+    )
+    insight = _call_llm(prompt)
+    if insight:
+        return {"insight": insight, "demo": False}
     return {"insight": DEMO_RISK_INSIGHT, "demo": True}
